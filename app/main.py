@@ -1,9 +1,20 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from app.api import parse
+from app.api import parse, trips
+from app.graph.build import build_graph
 
-app = FastAPI(title="Trip Planner API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.graph = build_graph()  # compile once, reuse for every request
+    yield
+
+
+app = FastAPI(title="Trip Planner API", lifespan=lifespan)
 app.include_router(parse.router)
+app.include_router(trips.router)
 
 
 @app.get("/health")

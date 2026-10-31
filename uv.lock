@@ -1520,6 +1520,7 @@ dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "langchain" },
     { name = "langchain-aws" },
+    { name = "langgraph" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
@@ -1536,6 +1537,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.162.0" },
     { name = "langchain", specifier = ">=1.4.7" },
     { name = "langchain-aws", specifier = ">=1.9.1" },
+    { name = "langgraph", specifier = ">=1.2.18" },
     { name = "pydantic-settings", specifier = ">=2.16.2" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
 ]

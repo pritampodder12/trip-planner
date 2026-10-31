@@ -1,9 +1,9 @@
 from functools import lru_cache
 
-from langchain.chat_models import init_chat_model
 from langchain_core.prompts import ChatPromptTemplate
 
-from app.core.config import settings
+from app.core.llm import get_llm
+from app.graph.state import TripState
 from app.schemas.trip import TripRequest
 
 prompt = ChatPromptTemplate.from_messages(
@@ -21,14 +21,13 @@ prompt = ChatPromptTemplate.from_messages(
 
 @lru_cache
 def get_chain():
-    model = init_chat_model(
-        settings.llm_model_id,
-        model_provider="bedrock_converse",
-        region_name=settings.aws_region,
-        temperature=settings.llm_temperature,
-    )
-    return prompt | model.with_structured_output(TripRequest)
+    return prompt | get_llm().with_structured_output(TripRequest)
 
 
 async def parse_trip_request(user_text: str) -> TripRequest:
     return await get_chain().ainvoke({"user_text": user_text})
+
+
+async def intake_node(state: TripState) -> dict:
+    request = await parse_trip_request(state["user_text"])
+    return {"request": request}
