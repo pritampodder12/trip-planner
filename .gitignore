@@ -1,10 +1,59 @@
-# Python-generated files
+# ---------- Secrets (never commit) ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials
+.aws/
+
+# ---------- Python ----------
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
 build/
 dist/
-wheels/
-*.egg-info
 
-# Virtual environments
-.venv
+# ---------- Virtual environments ----------
+.venv/
+venv/
+env/
+
+# ---------- Tooling caches ----------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---------- Jupyter ----------
+.ipynb_checkpoints/
+
+# ---------- Local databases / checkpoints (Phase 4+) ----------
+*.db
+*.sqlite
+*.sqlite3
+checkpoints/
+
+# ---------- Scratch files ----------
+scratch_*.py
+
+# ---------- Logs ----------
+*.log
+logs/
+
+# ---------- Docker local overrides (Phase 7) ----------
+docker-compose.override.yml
+
+# ---------- IDE / OS ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- LangGraph / LangSmith local ----------
+.langgraph_api/

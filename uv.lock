@@ -1518,6 +1518,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "boto3" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-aws" },
     { name = "langgraph" },
@@ -1535,6 +1536,7 @@ dev = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.43.122" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.162.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain", specifier = ">=1.4.7" },
     { name = "langchain-aws", specifier = ">=1.9.1" },
     { name = "langgraph", specifier = ">=1.2.18" },
