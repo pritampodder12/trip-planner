@@ -2,7 +2,7 @@
 
 > Keep this file in the repo root. Update the tracker after every phase.
 > To resume in any new session, paste the "Resume prompt" at the bottom.
-> **Last updated:** after Phase 1 (Phases 0 and 1 complete, next is Phase 2).
+> **Last updated:** after Phase 2 (Phases 0, 1 and 2 complete, next is Phase 3).
 
 ## 1. Project summary
 
@@ -12,7 +12,8 @@
 | Language / tooling | Python 3.12, **uv** (application project, `package = false`) |
 | API layer | FastAPI (graph compiled once in `lifespan`, stored in `app.state.graph`) |
 | LLM provider | **Amazon Bedrock** via `langchain-aws` (`ChatBedrockConverse`, provider `bedrock_converse`) |
-| Orchestration | LangChain for prompts and structured output, LangGraph for the workflow |
+| Orchestration | LangChain for prompts, structured output and tools; LangGraph for the workflow |
+| External data (no API keys) | Open-Meteo (geocoding, weather), MET Norway (weather fallback), Wikipedia search (places), Frankfurter/ECB (currency) |
 | Storage (later) | PostgreSQL for checkpointer + Store, pgvector for RAG |
 | Author background | 6 yrs full-stack (Java/Spring Boot, React, AWS), new to Python and AI agents |
 
@@ -22,8 +23,8 @@
 |---|---|---|---|
 | 0 | Setup and foundations | 3-4 days | **DONE** |
 | 1 | First graph (State, nodes, edges) | 1 week | **DONE** |
-| 2 | Tools and routing (ReAct, conditional edges) | 1 week | **NEXT** |
-| 3 | Parallelism and loops (`Send`, reducers, validator loop) | 1 week | TODO |
+| 2 | Tools and routing (ReAct, conditional edges) | 1 week | **DONE** (happy flow verified; negative flow still to test) |
+| 3 | Parallelism and loops (`Send`, reducers, validator loop) | 1 week | **NEXT** |
 | 4 | Persistence and human-in-the-loop (checkpointer, `interrupt`, time travel) | 1 week | TODO |
 | 5 | Streaming, memory, subgraphs | 1 week | TODO |
 | 6 | Guardrails and hardening | 4-5 days | TODO |
@@ -38,7 +39,7 @@
 | Tooling | uv installed, project created, Python pinned, deps added with `uv add` |
 | Project structure | `app/` with `api`, `core`, `schemas`, `tools`, `guardrails`, `rag`, `graph/{nodes,subgraphs,agents}`, plus `tests/`, `evals/` |
 | Config | `.env` + `.env.example`, Pydantic `Settings` in `app/core/config.py` |
-| AWS / Bedrock | Credentials, region, model ID or inference profile in `.env`; connectivity checked with a scratch script |
+| AWS / Bedrock | Credentials, region, model ID or inference profile in `.env` |
 | LangChain basics | `init_chat_model`, `ChatPromptTemplate`, chain with `\|`, `with_structured_output` |
 | Schema | `TripRequest` (cities, days, budget, currency, interests, travelers, start_date, missing_info) |
 | FastAPI basics | `GET /health`, `POST /parse-request`, Swagger UI at `/docs` |
@@ -48,18 +49,46 @@
 
 | Area | Done |
 |---|---|
-| LangGraph installed | `uv add langgraph` |
-| Shared LLM helper | `app/core/llm.py` with cached `get_llm()` |
-| State | `TripState` (TypedDict, `total=False`): `user_text`, `request`, `city_plan`, `itinerary` |
+| State | `TripState` (TypedDict, `total=False`) |
 | Nodes | `intake_node`, `city_allocator_node`, `itinerary_builder_node` (each returns only the keys it changed) |
-| Graph | `START → intake → city_allocator → itinerary_builder → END`, built in `app/graph/build.py` |
-| New schemas | `TripIn`, `CityStay`, `CityPlan`, `DayPlan`, `Itinerary`, `TripResponse` in `app/schemas/plan.py` |
-| API | `POST /trips` returns `request`, `city_plan` and `itinerary` |
-| Debugging aid | `scratch_graph.py` (git-ignored) prints the Mermaid diagram and per-node updates with `stream_mode="updates"` |
+| Graph | Linear graph built in `app/graph/build.py`, compiled once in the FastAPI `lifespan` |
+| Shared LLM | `app/core/llm.py` with cached `get_llm()` |
+| Schemas | `TripIn`, `CityStay`, `CityPlan`, `DayPlan`, `Itinerary`, `TripResponse` in `app/schemas/plan.py` |
+| API | `POST /trips` |
 
-**Working deliverable:** free text goes in, and a parsed request, a city/day split and a day-by-day itinerary come back as JSON.
+### Phase 2: Tools and routing (DONE)
 
-## 4. Current project structure
+| Area | Done |
+|---|---|
+| Tools (4) | `get_weather_forecast`, `search_places`, `estimate_travel`, `convert_currency` in `app/tools/`, collected in `ALL_TOOLS` |
+| Tool design | `@tool` with docstring as description; type hints as argument schema; errors returned as readable strings, never raised |
+| Shared HTTP helper | `geocode()` (cached) and `get_json()` (retry on timeouts, 429, 5xx) in `app/tools/geo.py`; descriptive `HEADERS` User-Agent with contact info |
+| Weather resilience | Open-Meteo first, MET Norway fallback, `WEATHER_MOCK=true` switch for development (output clearly labelled `[MOCK DATA]`) |
+| Required-field check in code | `validate_request_node` decides `missing_required` (cities, days, days_too_few) and non-blocking `assumptions` (budget, start date, interests); the LLM's `missing_info` is no longer used for decisions |
+| Conditional edge #1 | `validate_request` routes to `ask_user` (returns `status: needs_input` with questions) or to planning |
+| ReAct research loop | `prepare_research → research_agent ⇄ tools → save_notes`, using `bind_tools`, `ToolNode`, `tools_condition` |
+| First reducer | `messages: Annotated[list[AnyMessage], add_messages]` in `TripState` |
+| Grounded builder | Itinerary builder uses `research_notes` and is told to use only places named there |
+| Loop safety | `recursion_limit=30` plus `GraphRecursionError` handling in `POST /trips` |
+| API | `TripResponse` now has `status` (`needs_input` / `complete`), `questions`, `assumptions`, optional `city_plan` and `itinerary`; optional debug endpoint `GET /tools/weather` |
+
+**Working deliverable:** free text goes in. Missing required info returns follow-up questions. Otherwise the agent researches with live tools and returns a grounded itinerary with assumptions listed. Happy flow tested with several unrelated prompts.
+
+## 4. Current graph
+
+```
+START → intake → validate_request ──missing required info?──► ask_user → END
+                       │ ok
+                       ▼
+                 city_allocator → prepare_research → research_agent ◄──┐
+                                                          │            │
+                                              tool calls? ├─ yes ► tools
+                                                          │ no
+                                                          ▼
+                                                     save_notes → itinerary_builder → END
+```
+
+## 5. Current project structure
 
 ```
 trip-planner/
@@ -67,41 +96,52 @@ trip-planner/
 │   ├── main.py                 # FastAPI app + lifespan (compiles graph once), routers, /health
 │   ├── api/
 │   │   ├── parse.py            # POST /parse-request
-│   │   └── trips.py            # POST /trips (runs the graph)
+│   │   ├── trips.py            # POST /trips (runs graph, recursion_limit, needs_input/complete)
+│   │   └── tools.py            # GET /tools/weather (debug, optional)
 │   ├── core/
-│   │   ├── config.py           # Settings (aws_region, llm_model_id, llm_temperature)
+│   │   ├── config.py           # Settings (aws_region, llm_model_id, llm_temperature, weather_mock)
 │   │   └── llm.py              # get_llm() -> Bedrock chat model (cached)
 │   ├── schemas/
 │   │   ├── trip.py             # TripRequest
 │   │   └── plan.py             # TripIn, CityStay, CityPlan, DayPlan, Itinerary, TripResponse
+│   ├── tools/
+│   │   ├── __init__.py         # ALL_TOOLS
+│   │   ├── geo.py              # HEADERS, geocode(), get_json() with retry
+│   │   ├── weather.py          # Open-Meteo -> MET Norway fallback, mock switch
+│   │   ├── places.py           # Wikipedia search by city + interest
+│   │   ├── travel.py           # haversine distance, rough road time
+│   │   └── currency.py         # Frankfurter (ECB) conversion
 │   ├── graph/
-│   │   ├── state.py            # TripState
-│   │   ├── build.py            # build_graph(): nodes, edges, compile
+│   │   ├── state.py            # TripState (includes messages with add_messages)
+│   │   ├── build.py            # nodes, edges, 2 conditional edges, cycle, compile
 │   │   └── nodes/
-│   │       ├── intake.py       # intake_node (+ parse_trip_request used by /parse-request)
+│   │       ├── intake.py       # intake_node (+ parse_trip_request for /parse-request)
+│   │       ├── validate.py     # validate_request_node, route_after_validation, ask_user_node
 │   │       ├── allocator.py    # city_allocator_node
-│   │       └── builder.py      # itinerary_builder_node
-│   ├── tools/  guardrails/  rag/  graph/subgraphs/  graph/agents/   # empty, filled in later phases
+│   │       ├── research.py     # prepare_research_node, research_agent_node, save_notes_node
+│   │       └── builder.py      # itinerary_builder_node (uses research_notes)
+│   ├── guardrails/  rag/  graph/subgraphs/  graph/agents/   # empty, filled in later phases
 ├── tests/   evals/
-├── scratch_graph.py            # local debugging only (git-ignored)
+├── scratch_tools.py  scratch_graph.py   # local debugging only (git-ignored)
 ├── .env  .env.example  .gitignore
 ├── pyproject.toml  uv.lock  .python-version
 └── PROJECT_STATUS.md
 ```
 
-## 5. Run commands
+## 6. Run commands
 
 | Task | Command |
 |---|---|
 | Install / sync deps | `uv sync` |
 | Run API (dev) | `uv run uvicorn app.main:app --reload` (or `uv run fastapi dev app/main.py`) |
 | Swagger UI | `http://127.0.0.1:8000/docs` |
+| Test tools alone | `uv run scratch_tools.py` |
 | Inspect graph node by node | `uv run scratch_graph.py` |
 | Tests | `uv run pytest` |
 | Lint | `uv run ruff check .` |
 | Add a dependency | `uv add <package>` |
 
-## 6. Key concepts learned (one line each)
+## 7. Key concepts learned (one line each)
 
 | Concept | Note |
 |---|---|
@@ -114,21 +154,29 @@ trip-planner/
 | `init_chat_model` | Creates a chat model from provider and model ID, so switching models needs no code change |
 | `ChatBedrockConverse` | Bedrock chat class with the best tool-calling and structured-output support |
 | Inference profile | Region-prefixed model ID (`us.` / `apac.`) that some Bedrock models require |
-| `ChatPromptTemplate` | A prompt with `{placeholders}` filled at call time |
 | `with_structured_output` | Forces the LLM to return data matching a Pydantic class |
 | `prompt \| model` | A chain: output of one step feeds the next, always in a straight line |
 | State (`TripState`) | The one shared object every node reads from and writes to |
-| Node | An async function that takes state and returns only the keys it changed |
+| Node | A function that takes state and returns only the keys it changed |
 | Edge | A fixed "run this next" wire between two nodes |
-| `StateGraph` | The builder where you register nodes and edges |
-| `compile()` | Freezes the graph into a reusable runnable (`ainvoke`, `astream`) |
-| Default overwrite | A returned key replaces the old value (merging reducers come in Phase 3) |
+| `StateGraph` / `compile()` | Builder, then a frozen reusable runnable (`ainvoke`, `astream`) |
+| Default overwrite | A returned key replaces the old value unless the field has a reducer |
+| Reducer (`add_messages`) | Changes a field from "overwrite" to "append"; Phase 3 writes custom ones |
 | `stream_mode="updates"` | Shows what each node returned, great for debugging |
-| FastAPI `lifespan` | Startup/shutdown hook; compile the graph once and keep it in `app.state` |
-| `app.state` | Shared holder for singletons across requests, like a Spring bean |
-| `uv run X` | Runs X inside the project's environment, no manual venv activation |
+| FastAPI `lifespan` / `app.state` | Startup hook and shared singleton holder (like `@PostConstruct` and a bean) |
+| `@tool` | Turns a function into an LLM-callable tool; docstring = description, type hints = schema |
+| Tool call | The LLM only **requests** a call; `ToolNode` actually runs it |
+| `bind_tools` | Tells the LLM which tools exist |
+| ReAct loop | A graph cycle: LLM → tools → LLM, exits when the LLM answers in plain text |
+| Conditional edge | A router function returns the next node's name from the state |
+| `tools_condition` | Built-in router: "tools" if the last message has tool calls, else END |
+| `recursion_limit` | Cap on total graph steps; stops runaway loops |
+| Decide in code, extract with the LLM | Required-field checks are deterministic Python, not LLM judgment |
+| Tools return errors as text | The LLM can adapt; crashes end the request |
+| Retry only temporary errors | Timeouts, 429 and 5xx; never 4xx |
+| Fallback + mock | Every external dependency needs a plan B; mock data must be labelled |
 
-## 7. Lessons learned (bugs and fixes)
+## 8. Lessons learned (bugs and fixes)
 
 | Problem | Cause | Fix |
 |---|---|---|
@@ -138,46 +186,51 @@ trip-planner/
 | Bedrock "on-demand throughput not supported" | Model needs an inference profile | Use the profile ID (`us.` / `apac.` prefix) from the console |
 | `.env` got committed | `.gitignore` doesn't affect already-tracked files | `git rm --cached .env`, amend or recommit; rotate keys if any were pushed |
 | Mermaid printed `<bound method ...>` | Missing `()` on `draw_mermaid` | `print(graph.get_graph().draw_mermaid())` |
-| Third node's output showed `None` | Typo in returned key (`ininerary` vs `itinerary`); state dict keys aren't checked at runtime | Keep names identical across state, node, schema and API; use editor rename (F2) |
+| Node output showed `None`; later "Field required" | Typo in state key (`ininerary` vs `itinerary`); dict keys aren't checked at runtime | Keep names identical across state, node, schema and API; use editor rename (F2) |
 | `'State' object has no attribute 'graph'` | `lifespan` not attached or stale server | `FastAPI(..., lifespan=lifespan)`, restart, check startup log |
-| Pydantic "Field required" on `TripResponse` | Same typo in the schema field | Search the codebase for the misspelling and fix everywhere |
+| Weather tool: `503 Service Unavailable` | Open-Meteo forecast API outage (confirmed on its status page) | Retry helper, MET Norway fallback, `WEATHER_MOCK` switch |
+| Places tool: `403 Please respect our robot policy` | Wikimedia needs a descriptive User-Agent with real contact info | Set `HEADERS` User-Agent with app name and your email or repo URL |
+| Places returned nothing useful | Parameter typo `grsearch` instead of `gsrsearch`; APIs ignore unknown params silently | Compare the final URL with the docs character by character |
+| Error message ended with literal `e` | f-string missing braces (`: e` instead of `: {e}`) | Use `{type(e).__name__}: {e}` so empty messages still show the class |
 
-## 8. Known limitations of the current graph
+## 9. Known limitations of the current graph
 
 | Limitation | Fixed in |
 |---|---|
-| Places, timings and prices come from LLM memory and may be wrong | Phase 2 (tools), Phase 6 (grounding guardrail) |
-| No routing: input like "plan me a trip" still runs all three nodes | Phase 2 (conditional edges) |
-| `missing_info` relies on the LLM (e.g. `start_date` may not be listed) | Phase 2 (compute missing fields in code) |
-| Does not check that days add up or that budget fits | Phase 3 (validator loop) |
-| No pause, approve or edit | Phase 4 |
-| Three sequential LLM calls, so responses are slow | Phase 5 (streaming), Phase 3 (parallelism) |
+| The LLM can still ignore the research notes and invent places or numbers | Phase 6 (output grounding guardrail) |
+| Places come from Wikipedia search, so quality is uneven | Phase 7 (better source or RAG) |
+| Days may not add up exactly; budget is not checked | Phase 3 (validator loop) |
+| Cities are researched one after another via a single agent (slow) | Phase 3 (`Send` for parallel research) |
+| After `needs_input` the client must resend a full request; the graph forgets the first attempt | Phase 4 (checkpointer + `interrupt` / resume) |
+| No streaming, so responses feel slow (several LLM calls and tool calls) | Phase 5 |
+| No input guardrails (off-topic, prompt injection) | Phase 6 |
+| Weather works only about 10 days ahead; later trips get no forecast | Accepted; notes should say so |
+| Negative-flow tests not run yet (vague input, too few days, failing tools) | Open item below |
 
-## 9. Remaining phases in detail
+## 10. Remaining phases in detail
 
 | Phase | Build | Key concepts | Planned API additions | Done when... |
 |---|---|---|---|---|
-| **2** | Tools: weather, places search, distance/travel time, currency; ReAct loop; "ask if info missing" routing; required-field check in code | `@tool`, `ToolNode`, `tools_condition`, conditional edges | `GET /tools/weather` (debug) | Agent uses live tools and routes on missing info |
-| **3** | Parallel city research; builder + validator loop with retry cap (max 3) | `Send`, reducers (`operator.add`), cycles, reflection | same API, richer output | Cities researched in parallel; validator loop works |
+| **3** | Parallel per-city research (each city its own research task); builder + validator loop (days add up, budget fits, every day has places) with retry cap (max 3); custom reducers for merging parallel results | `Send` (map-reduce), reducers (`operator.add` and custom), cycles, reflection pattern | same API, richer output (warnings, validation report) | Cities researched in parallel; validator loop corrects a bad itinerary and stops at the cap |
 | **4** | Checkpointer (SQLite then Postgres); `interrupt` for missing info, hotel choice, final approval; edit and rewind | Checkpointer, threads, `interrupt`, `Command(resume=...)`, state history, time travel | `GET /trips/{id}`, `POST /trips/{id}/resume`, `GET /trips/{id}/history`, `POST /trips/{id}/rewind` | Pause, approve, edit, rewind a trip over HTTP |
 | **5** | Streaming progress; long-term preferences; City Research as a subgraph | `astream` modes, SSE, Store, namespaces, subgraphs | `GET /trips/{id}/stream`, `GET/PUT /users/{id}/preferences` | Progress streams live; preferences persist across trips |
 | **6** | Input / tool / output guardrails; retries, fallbacks, timeouts; request IDs, rate limiting. Compare with Bedrock Guardrails | Guardrail nodes, grounding check, safe failure | Global error handlers | Bad inputs rejected; every stop grounded in tool results |
 | **7** | Supervisor + Flight/Hotel/Activities agents; Booking handoff; agentic RAG (retrieve, grade, rewrite); image input; evals; LangSmith tracing; auth; Docker; deploy on ECS | Supervisor, handoffs, `Command(graph=Command.PARENT)`, agentic RAG, multimodal, evals, deployment | `POST /trips/{id}/book`, `POST /trips/{id}/upload`, `GET /trips/{id}/export`, `POST /auth/login` | Team plans, RAG answers visa questions, evals pass, runs in Docker |
 
-## 10. Coverage map
+## 11. Coverage map
 
 | Concept | Phase | Status |
 |---|---|---|
 | Structured output | 0 | Done |
 | State, nodes, edges, compile | 1 | Done |
-| Tools, ReAct, conditional edges | 2 | Next |
-| `Send`, reducers, validator loop | 3 | Todo |
+| Tools, ReAct, conditional edges, `add_messages` | 2 | Done |
+| `Send`, custom reducers, validator loop | 3 | Next |
 | Checkpointer, threads, `interrupt`, time travel | 4 | Todo |
 | Streaming, Store, subgraphs | 5 | Todo |
 | Guardrails, error handling | 6 | Todo |
 | Multi-agent, handoffs, agentic RAG, multimodal, evals, deployment | 7 | Todo |
 
-## 11. Decisions and conventions
+## 12. Decisions and conventions
 
 | Decision | Reason |
 |---|---|
@@ -186,23 +239,28 @@ trip-planner/
 | One shared `get_llm()` in `app/core/llm.py` | Single place to change model settings |
 | Compile the graph once in `lifespan`, reuse per request | Avoid rebuild cost on every call |
 | Nodes return only changed keys as a dict | LangGraph merges partial updates into state |
-| Use `ChatBedrockConverse` (not `ChatBedrock`) | Best tool-calling and structured-output support |
-| Cap every loop (max 3 retries) | Prevent runaway token cost |
+| Required-field validation in plain Python | Free, instant and consistent; the LLM only extracts |
+| Tools return errors as text, never raise | The LLM can adapt and the request survives |
+| Tool HTTP calls go through `get_json()` with retry | Absorbs temporary 429/5xx/timeouts |
+| Weather has a fallback and a labelled mock | A single free API outage must not block development |
+| Builder may only use places from `research_notes` | Reduces invented places (full enforcement in Phase 6) |
+| Cap every loop (recursion limit, max tool calls, retries) | Prevent runaway token cost |
 | Scratch scripts named `scratch_*.py` | Git-ignored |
 | Never commit `.env`; commit `.env.example` | Secrets safety |
 | Prefer `AWS_PROFILE` (SSO) over access keys | No secret to leak; ECS task role replaces keys in Phase 7 |
 
-## 12. Open items before Phase 2
+## 13. Open items before Phase 3
 
 | Item | Status |
 |---|---|
-| Remove temporary `print("Graph compiled")` from `main.py` | To do |
-| Confirm `.env` is untracked (`git ls-files .env` prints nothing) | To do |
-| Commit Phase 1 (`git commit -m "phase 1: first 3-node graph"`) | To do |
-| Set an AWS Budgets alert for Bedrock spend | Recommended |
-| Optional: add a `TestClient` test (use `with TestClient(app)` so lifespan runs) | Optional |
+| Negative-flow tests: `plan me a trip` (expect `needs_input`), 3 cities in 2 days (expect "too few days"), unknown city, a failing tool | Deferred by choice; do before Phase 6 at the latest |
+| Set `WEATHER_MOCK=false` once real weather works; confirm `.env.example` lists `WEATHER_MOCK` | To check |
+| Confirm the User-Agent in `geo.py` has your real contact (Wikimedia and MET Norway require it) | To check |
+| Confirm `.env` is untracked (`git ls-files .env` prints nothing), then commit (`git commit -m "phase 2: tools, ReAct loop, conditional edges"`) | To do |
+| Set an AWS Budgets alert for Bedrock spend (the research loop makes many LLM calls) | Recommended |
+| Optional: add `TestClient` tests (use `with TestClient(app)` so lifespan runs) and mock the weather tool | Optional |
 
-## 13. Resume prompt (paste into a new session)
+## 14. Resume prompt (paste into a new session)
 
 ```
 I'm building a LangGraph trip planner (2-3 cities, 5-day itinerary) with FastAPI,
@@ -211,15 +269,19 @@ agents but have 6 years of software engineering experience (Java/Spring Boot,
 React, AWS). I prefer step-by-step plans with tables, plain-English
 explanations, and exam tips.
 
-Phases 0 and 1 are complete: project setup, Settings, TripRequest schema,
-shared get_llm(), TripState, a 3-node graph (intake -> city_allocator ->
-itinerary_builder), compiled once in FastAPI lifespan, POST /trips working.
-Structure, concepts, lessons and decisions are in PROJECT_STATUS.md (pasted below).
+Phases 0, 1 and 2 are complete: project setup, Settings, structured output,
+TripState with messages, validate_request (required fields checked in code) with
+a conditional edge to ask_user, city_allocator, a ReAct research loop with four
+tools (weather with fallback and mock switch, places, travel estimate,
+currency), grounded itinerary_builder, POST /trips returning status
+needs_input or complete. Structure, concepts, lessons and decisions are in
+PROJECT_STATUS.md (pasted below).
 
-Start Phase 2: add tools (weather, places search, distance/travel time,
-currency), a ReAct loop with ToolNode, and conditional edges so the graph asks
-for missing info instead of planning a trip with no cities. Compute required
-missing fields in code instead of trusting the LLM.
+Start Phase 3: run city research in parallel with Send (map-reduce) using
+custom reducers, and add a validator loop after the builder (days add up,
+budget fits, each day has real places) with a retry cap of 3 and a final
+"best attempt with warnings" fallback. Keep the existing API shape and add
+validation warnings to the response.
 
 [paste the contents of PROJECT_STATUS.md here]
 ```

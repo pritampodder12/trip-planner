@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import Literal
 
 from app.schemas.trip import TripRequest
 
@@ -36,6 +37,9 @@ class Itinerary(BaseModel):
 
 
 class TripResponse(BaseModel):
+    status: Literal["needs_input", "complete"]
     request: TripRequest
-    city_plan: CityPlan
-    itinerary: Itinerary
+    questions: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    city_plan: CityPlan | None = None
+    itinerary: Itinerary | None = None

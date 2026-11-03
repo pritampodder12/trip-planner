@@ -7,6 +7,8 @@ load_dotenv()
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    weather_mock: bool = False
+
     aws_region: str = "ap-south-1"
     llm_model_id: str
     llm_temperature: float = 0.2

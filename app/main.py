@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import parse, trips
+from app.api import parse, tools, trips
 from app.graph.build import build_graph
 
 
@@ -15,6 +15,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Trip Planner API", lifespan=lifespan)
 app.include_router(parse.router)
 app.include_router(trips.router)
+app.include_router(tools.router)
 
 
 @app.get("/health")

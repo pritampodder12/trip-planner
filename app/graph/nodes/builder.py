@@ -12,9 +12,15 @@ prompt = ChatPromptTemplate.from_messages(
             "system",
             "You are a travel planner. Create a day-by-day itinerary that follows the "
             "city plan exactly (same order, same number of days per city). Match the "
-            "traveler's interests and budget. Keep each time slot to one or two sentences.",
+            "traveler's interests and budget. Keep each time slot to one or two sentences.\n"
+            "Use ONLY places named in the research notes. If the notes lack something, "
+            "write 'to be confirmed' instead of inventing it. Mention weather and "
+            "travel time between cities where the notes provide them.",
         ),
-        ("human", "Trip request:\n{request_json}\n\nCity plan:\n{plan_json}"),
+        (
+            "human",
+            "Trip request:\n{request_json}\n\nCity plan:\n{plan_json}\n\nResearch notes:\n{notes}",
+        ),
     ]
 )
 
@@ -29,6 +35,7 @@ async def itinerary_builder_node(state: TripState) -> dict:
         {
             "request_json": state["request"].model_dump_json(),
             "plan_json": state["city_plan"].model_dump_json(),
+            "notes": state.get("research_notes", "No research notes available."),
         }
     )
     return {"itinerary": itinerary}
