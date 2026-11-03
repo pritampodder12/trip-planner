@@ -1,4 +1,7 @@
+import time
+
 from fastapi import APIRouter, HTTPException, Request
+from langchain_core.callbacks import get_usage_metadata_callback
 from langgraph.errors import GraphRecursionError
 
 from app.schemas.plan import TripIn, TripResponse
@@ -9,16 +12,26 @@ router = APIRouter(prefix="/trips", tags=["trips"])
 @router.post("", response_model=TripResponse)
 async def create_trip(body: TripIn, request: Request) -> TripResponse:
     graph = request.app.state.graph
-    try:
-        result = await graph.ainvoke(
-            {"user_text": body.text},
-            config={"recursion_limit": 30},
-        )
-    except GraphRecursionError:
-        raise HTTPException(
-            status_code=500,
-            details="Planning took too many steps. Try a simpler request.",
-        )
+    started = time.perf_counter()
+
+    with get_usage_metadata_callback() as cb:
+        try:
+            result = await graph.ainvoke(
+                {"user_text": body.text},
+                config={"recursion_limit": 30},
+            )
+        except GraphRecursionError:
+            raise HTTPException(
+                status_code=500,
+                detail="Planning took too many steps. Try a simpler request.",
+            )
+        finally:
+            total = sum(u["total_tokens"] for u in cb.usage_metadata.values())
+            print(
+                f"[usage] total_tokens={total} "
+                f"duration_s={time.perf_counter() - started:.1f} "
+                f"details={cb.usage_metadata}"
+            )
 
     if result.get("missing_required"):
         return TripResponse(
