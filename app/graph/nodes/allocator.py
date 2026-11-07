@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -5,6 +6,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.core.llm import get_llm
 from app.graph.state import TripState
 from app.schemas.plan import CityPlan
+
+logger = logging.getLogger(__name__)
 
 prompt = ChatPromptTemplate.from_messages(
     [
@@ -25,7 +28,9 @@ def get_chain():
 
 
 async def city_allocator_node(state: TripState) -> dict:
+    logger.info("[node] city_allocator | cities=%s days=%s", state["request"].cities, state["request"].days)
     plan = await get_chain().ainvoke(
         {"request_json": state["request"].model_dump_json()}
     )
+    logger.info("[node] city_allocator | done | stays=%s", [(s.city, s.days) for s in plan.stays])
     return {"city_plan": plan}

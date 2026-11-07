@@ -1,9 +1,12 @@
+import logging
 from math import asin, cos, radians, sin, sqrt
 
 import httpx
 from langchain_core.tools import tool
 
 from app.tools.geo import geocode
+
+logger = logging.getLogger(__name__)
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -20,6 +23,7 @@ async def estimate_travel(origin_city: str, destination_city: str) -> str:
     """Roughly estimate the road distance and driving time between two cities.
     This is an approximation from coordinates, not a live route or a train/flight
     timetable."""
+    logger.info("[tool] estimate_travel | origin=%r destination=%r", origin_city, destination_city)
     try:
         a = await geocode(origin_city)
         b = await geocode(destination_city)

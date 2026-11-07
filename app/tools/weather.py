@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
@@ -6,6 +7,8 @@ from langchain_core.tools import tool
 
 from app.core.config import settings
 from app.tools.geo import geocode, get_json
+
+logger = logging.getLogger(__name__)
 
 
 async def _open_meteo(place: dict, days: int) -> str:
@@ -71,6 +74,7 @@ async def get_weather_forecast(city: str, days: int = 5) -> str:
     """Get the daily weather forecast for a city: min/max temperature in °C and
     rain. Only covers about the next 10 days; for trips further away, tell the
     user that exact weather is not known yet."""
+    logger.info("[tool] get_weather_forecast | city=%r days=%d", city, days)
     days = max(1, min(days, 10))
 
     # if settings.weather_mock:

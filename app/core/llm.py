@@ -23,7 +23,7 @@ def _make_azure_llm():
         model=settings.azure_openai_deployment,
         base_url=settings.azure_openai_endpoint,
         api_key=settings.azure_openai_api_key,
-        reasoning_effort="low",
+        reasoning_effort="minimal",  # "minimal" | "low" | "medium" | "high"
         verbosity="low",
         temperature=settings.llm_temperature,
     )

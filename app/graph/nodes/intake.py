@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -5,6 +6,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.core.llm import get_llm
 from app.graph.state import TripState
 from app.schemas.trip import TripRequest
+
+logger = logging.getLogger(__name__)
 
 prompt = ChatPromptTemplate.from_messages(
     [
@@ -29,5 +32,7 @@ async def parse_trip_request(user_text: str) -> TripRequest:
 
 
 async def intake_node(state: TripState) -> dict:
+    logger.info("[node] intake | user_text=%r", state["user_text"])
     request = await parse_trip_request(state["user_text"])
+    logger.info("[node] intake | done | cities=%s days=%s", request.cities, request.days)
     return {"request": request}

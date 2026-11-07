@@ -1,3 +1,4 @@
+import logging
 import time
 
 from fastapi import APIRouter, HTTPException, Request
@@ -7,6 +8,8 @@ from langgraph.errors import GraphRecursionError
 from app.schemas.plan import TripIn, TripResponse
 
 router = APIRouter(prefix="/trips", tags=["trips"])
+
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=TripResponse)
@@ -27,11 +30,9 @@ async def create_trip(body: TripIn, request: Request) -> TripResponse:
             )
         finally:
             total = sum(u["total_tokens"] for u in cb.usage_metadata.values())
-            print(
-                f"[usage] total_tokens={total} "
-                f"duration_s={time.perf_counter() - started:.1f} "
-                f"details={cb.usage_metadata}"
-            )
+            logger.info("[usage] total_tokens=%s", total)
+            logger.info("[usage] duration_s=%.1f", time.perf_counter() - started)
+            logger.info("[usage] details=%s", cb.usage_metadata)
 
     if result.get("missing_required"):
         return TripResponse(

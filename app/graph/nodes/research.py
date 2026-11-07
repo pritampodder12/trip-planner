@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -5,6 +6,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.core.llm import get_llm
 from app.graph.state import TripState
 from app.tools import ALL_TOOLS
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a travel research assistant. Use the tools to collect facts for the trip.\n"
@@ -39,6 +42,7 @@ def message_text(msg) -> str:
 
 
 async def prepare_research_node(state: TripState) -> dict:
+    logger.info("[node] prepare_research | cities=%s", [s.city for s in state["city_plan"].stays])
     task = (
         f"Trip request:\n{state['request'].model_dump_json()}\n\n"
         f"City plan:\n{state['city_plan'].model_dump_json()}"
@@ -47,9 +51,15 @@ async def prepare_research_node(state: TripState) -> dict:
 
 
 async def research_agent_node(state: TripState) -> dict:
+    logger.info("[node] research_agent | invoking LLM | messages_so_far=%d", len(state["messages"]))
     response = await get_agent_llm().ainvoke(
         [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
     )
+    if response.tool_calls:
+        for tc in response.tool_calls:
+            logger.info("[tool_call] tool=%s args=%s", tc["name"], tc["args"])
+    else:
+        logger.info("[node] research_agent | LLM finished tool calls, writing notes")
     return {"messages": [response]}
 
 
