@@ -1,36 +1,34 @@
 import logging
+import re
 from functools import lru_cache
+from typing import TypedDict
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.types import Send
 
-from app.core.llm import get_llm
 from app.graph.state import TripState
-from app.tools import ALL_TOOLS
+from app.graph.subgraphs.city_research import build_city_research_graph
+from app.schemas.trip import TripRequest
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = (
-    "You are a travel research assistant. Use the tools to collect facts for the trip.\n"
-    "Rules:\n"
-    "- Call get_weather_forecast once per city.\n"
-    "- Call search_places for each city, once per traveler interest (at most 2 interests per city).\n"
-    "- Call estimate_travel between consecutive cities.\n"
-    "- Call convert_currency only if the budget needs converting.\n"
-    "- Never invent places or numbers. If a tool fails, say so in your notes.\n"
-    "- Make at most 10 tool calls in total.\n"
-    "When you have enough, stop calling tools and write concise research notes: "
-    "weather per city, a shortlist of place names (only from tool results), "
-    "travel between cities, and the budget."
-)
+
+class CityTask(TypedDict):
+    """The private input each parallel branch receives."""
+
+    city: str
+    days: int
+    previous_city: str | None
+    request: TripRequest
 
 
 @lru_cache
-def get_agent_llm():
-    return get_llm().bind_tools(ALL_TOOLS)
+def get_city_graph():
+    return build_city_research_graph()
 
 
 def message_text(msg) -> str:
-    """Bedrock may return content as a list of blocks; normalise to a string."""
     content = msg.content
     if isinstance(content, str):
         return content
@@ -41,27 +39,41 @@ def message_text(msg) -> str:
     )
 
 
-async def prepare_research_node(state: TripState) -> dict:
-    logger.info("[node] prepare_research | cities=%s", [s.city for s in state["city_plan"].stays])
-    task = (
-        f"Trip request:\n{state['request'].model_dump_json()}\n\n"
-        f"City plan:\n{state['city_plan'].model_dump_json()}"
+def fan_out_research(state: TripState) -> list[Send]:
+    """Conditional edge that returns one Send per city (map step)."""
+    stays = state["city_plan"].stays
+    return [
+        Send(
+            "research_city",
+            {
+                "city": stay.city,
+                "days": stay.days,
+                "previous_city": stays[i - 1].city if i > 0 else None,
+                "request": state["request"],
+            },
+        )
+        for i, stay in enumerate(stays)
+    ]
+
+
+async def research_city_node(task: CityTask, config: RunnableConfig) -> dict:
+    req = task["request"]
+    prompt = (
+        f"City: {task['city']}\n"
+        f"Days in this city: {task['days']}\n"
+        f"Previous city: {task['previous_city'] or 'none (trip starts here)'}\n"
+        f"Traveler interests: {', '.join(req.interests) or 'not specified'}\n"
+        f"Travelers: {req.travelers}, budget: {req.budget} {req.currency}"
     )
-    return {"messages": [HumanMessage(content=task)]}
-
-
-async def research_agent_node(state: TripState) -> dict:
-    logger.info("[node] research_agent | invoking LLM | messages_so_far=%d", len(state["messages"]))
-    response = await get_agent_llm().ainvoke(
-        [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
+    # Pass `config` so callbacks (token logging, tracing) also see the nested calls.
+    result = await get_city_graph().ainvoke(
+        {"messages": [HumanMessage(content=prompt)]}, config=config
     )
-    if response.tool_calls:
-        for tc in response.tool_calls:
-            logger.info("[tool_call] tool=%s args=%s", tc["name"], tc["args"])
-    else:
-        logger.info("[node] research_agent | LLM finished tool calls, writing notes")
-    return {"messages": [response]}
+    messages = result["messages"]
+    places: list[str] = []
+    for m in messages:
+        if isinstance(m, ToolMessage) and m.name == "search_places":
+            places += re.findall(r"^- (.+?):", str(m.content), flags=re.MULTILINE)
 
-
-async def save_notes_node(state: TripState) -> dict:
-    return {"research_notes": message_text(state["messages"][-1])}
+    note = {"city": task["city"], "notes": message_text(messages[-1]), "places": places}
+    return {"city_notes": {task["city"]: note}}  # merged by merge_dicts

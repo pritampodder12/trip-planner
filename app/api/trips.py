@@ -45,6 +45,8 @@ async def create_trip(body: TripIn, request: Request) -> TripResponse:
         status="complete",
         request=result["request"],
         assumptions=result.get("assumptions", []),
+        warnings=result.get("warnings", []),
+        attempts=result.get("attempts"),
         city_plan=result["city_plan"],
         itinerary=result["itinerary"],
     )
