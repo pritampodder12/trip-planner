@@ -1,10 +1,18 @@
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import AnyMessage
-from langgraph.graph.message import add_messages
-
 from app.schemas.plan import CityPlan, Itinerary
 from app.schemas.trip import TripRequest
+
+
+def merge_dicts(left: dict | None, right: dict | None) -> dict:
+    """Reducer: combine writes from parallel branches by key."""
+    return {**(left or {}), **(right or {})}
+
+
+class CityNotes(TypedDict):
+    city: str
+    notes: str
+    places: list[str]
 
 
 class TripState(TypedDict, total=False):
@@ -14,6 +22,10 @@ class TripState(TypedDict, total=False):
     assumptions: list[str]  # non-blocking gaps (no budget, no dates...)
     questions: list[str]  # follow-up questions for the user
     city_plan: CityPlan  # written by city_allocator
-    messages: Annotated[list[AnyMessage], add_messages]  # reducer: append
-    research_notes: str
+    city_notes: Annotated[dict[str, CityNotes], merge_dicts]  # filled in parallel
+    # messages: Annotated[list[AnyMessage], add_messages]  # reducer: append
+    # research_notes: str
     itinerary: Itinerary  # written by itinerary_builder
+    attempts: int
+    validation_errors: list[str]
+    warnings: list[str]
