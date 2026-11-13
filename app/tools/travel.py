@@ -23,7 +23,7 @@ async def estimate_travel(origin_city: str, destination_city: str) -> str:
     """Roughly estimate the road distance and driving time between two cities.
     This is an approximation from coordinates, not a live route or a train/flight
     timetable."""
-    logger.info("[tool] estimate_travel | origin=%r destination=%r", origin_city, destination_city)
+    # logger.info("[tool] estimate_travel | origin=%r destination=%r", origin_city, destination_city)
     try:
         a = await geocode(origin_city)
         b = await geocode(destination_city)

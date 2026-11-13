@@ -17,12 +17,24 @@ async def create_trip(body: TripIn, request: Request) -> TripResponse:
     graph = request.app.state.graph
     started = time.perf_counter()
 
+    result = {}
+
     with get_usage_metadata_callback() as cb:
         try:
-            result = await graph.ainvoke(
+            #  result = await graph.ainvoke(
+            #     {"user_text": body.text},
+            #     config={"recursion_limit": 30},
+            # )
+            async for chunk in graph.astream(
                 {"user_text": body.text},
                 config={"recursion_limit": 30},
-            )
+                stream_mode="updates",
+            ):
+                print(chunk)
+
+                for node_update in chunk.values():
+                    result.update(node_update)
+
         except GraphRecursionError:
             raise HTTPException(
                 status_code=500,

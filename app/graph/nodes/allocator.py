@@ -28,18 +28,18 @@ def get_chain():
 
 
 async def city_allocator_node(state: TripState) -> dict:
-    logger.info(
-        "[node] city_allocator | cities=%s days=%s",
-        state["request"].cities,
-        state["request"].days,
-    )
+    # logger.info(
+    #     "[node] city_allocator | cities=%s days=%s",
+    #     state["request"].cities,
+    #     state["request"].days,
+    # )
     req = state["request"]
     plan = await get_chain().ainvoke({"request_json": req.model_dump_json()})
     diff = req.days - sum(s.days for s in plan.stays)
     if diff and plan.stays:
         plan.stays[-1].days = max(1, plan.stays[-1].days + diff)
-    logger.info(
-        "[node] city_allocator | done | stays=%s",
-        [(s.city, s.days) for s in plan.stays],
-    )
+    # logger.info(
+    #     "[node] city_allocator | done | stays=%s",
+    #     [(s.city, s.days) for s in plan.stays],
+    # )
     return {"city_plan": plan}

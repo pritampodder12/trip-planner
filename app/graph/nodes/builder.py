@@ -49,10 +49,10 @@ def _format_notes(state: TripState) -> str:
 
 
 async def itinerary_builder_node(state: TripState) -> dict:
-    logger.info(
-        "[node] itinerary_builder | cities=%s",
-        [s.city for s in state["city_plan"].stays],
-    )
+    # logger.info(
+    #     "[node] itinerary_builder | cities=%s",
+    #     [s.city for s in state["city_plan"].stays],
+    # )
     errors = state.get("validation_errors") or []
     if errors and state.get("itinerary"):
         feedback = (
@@ -72,5 +72,5 @@ async def itinerary_builder_node(state: TripState) -> dict:
             "feedback": feedback,
         }
     )
-    logger.info("[node] itinerary_builder | done | total_days=%d", len(itinerary.days))
+    # logger.info("[node] itinerary_builder | done | total_days=%d", len(itinerary.days))
     return {"itinerary": itinerary, "attempts": state.get("attempts", 0) + 1}

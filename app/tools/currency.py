@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 async def convert_currency(amount: float, from_currency: str, to_currency: str) -> str:
     """Convert an amount between two currencies using the latest ECB reference
     rates, for example amount=500, from_currency='USD', to_currency='INR'."""
-    logger.info("[tool] convert_currency | amount=%s from=%r to=%r", amount, from_currency, to_currency)
+    # logger.info("[tool] convert_currency | amount=%s from=%r to=%r", amount, from_currency, to_currency)
     src, dst = from_currency.upper(), to_currency.upper()
     try:
         async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:

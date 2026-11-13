@@ -32,7 +32,7 @@ async def parse_trip_request(user_text: str) -> TripRequest:
 
 
 async def intake_node(state: TripState) -> dict:
-    logger.info("[node] intake | user_text=%r", state["user_text"])
+    # logger.info("[node] intake | user_text=%r", state["user_text"])
     request = await parse_trip_request(state["user_text"])
-    logger.info("[node] intake | done | cities=%s days=%s", request.cities, request.days)
+    # logger.info("[node] intake | done | cities=%s days=%s", request.cities, request.days)
     return {"request": request}

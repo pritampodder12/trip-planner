@@ -13,7 +13,7 @@ async def search_places(city: str, interest: str) -> str:
     """Find places in a city that match one interest, for example city='Jaipur',
     interest='forts'. Returns up to 6 place names with a short description.
     Call it once per city and interest."""
-    logger.info("[tool] search_places | city=%r interest=%r", city, interest)
+    # logger.info("[tool] search_places | city=%r interest=%r", city, interest)
     params = {
         "action": "query",
         "format": "json",

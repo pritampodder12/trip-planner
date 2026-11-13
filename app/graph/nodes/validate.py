@@ -12,7 +12,7 @@ OPTIONAL_NOTES = {
 
 
 def validate_request_node(state: TripState) -> dict:
-    logger.info("[node] validate_request | cities=%s days=%s", state["request"].cities, state["request"].days)
+    # logger.info("[node] validate_request | cities=%s days=%s", state["request"].cities, state["request"].days)
     req = state["request"]
 
     missing: list[str] = []
@@ -37,12 +37,12 @@ def validate_request_node(state: TripState) -> dict:
 def route_after_validation(state: TripState) -> str:
     """Conditional edge: returns the NAME of the next node."""
     next_node = "ask_user" if state.get("missing_required") else "city_allocator"
-    logger.info("[edge] route_after_validation | missing=%s -> %s", state.get("missing_required"), next_node)
+    # logger.info("[edge] route_after_validation | missing=%s -> %s", state.get("missing_required"), next_node)
     return next_node
 
 
 def ask_user_node(state: TripState) -> dict:
-    logger.info("[node] ask_user | missing=%s", state["missing_required"])
+    # logger.info("[node] ask_user | missing=%s", state["missing_required"])
     req = state["request"]
     questions: list[str] = []
     for item in state["missing_required"]:
