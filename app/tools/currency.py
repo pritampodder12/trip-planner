@@ -3,12 +3,14 @@ import logging
 import httpx
 from langchain_core.tools import tool
 
+from app.core.logging_config import log_call
 from app.tools.geo import HEADERS
 
 logger = logging.getLogger(__name__)
 
 
 @tool
+@log_call("tool", log_args=True)
 async def convert_currency(amount: float, from_currency: str, to_currency: str) -> str:
     """Convert an amount between two currencies using the latest ECB reference
     rates, for example amount=500, from_currency='USD', to_currency='INR'."""

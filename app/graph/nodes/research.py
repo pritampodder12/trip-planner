@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Send
 
+from app.core.logging_config import log_call
 from app.graph.state import TripState
 from app.graph.subgraphs.city_research import build_city_research_graph
 from app.schemas.trip import TripRequest
@@ -56,6 +57,7 @@ def fan_out_research(state: TripState) -> list[Send]:
     ]
 
 
+@log_call("node")
 async def research_city_node(task: CityTask, config: RunnableConfig) -> dict:
     req = task["request"]
     prompt = (

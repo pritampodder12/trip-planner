@@ -6,6 +6,7 @@ import httpx
 from langchain_core.tools import tool
 
 from app.core.config import settings
+from app.core.logging_config import log_call
 from app.tools.geo import geocode, get_json
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ def _mock(city: str, days: int) -> str:
 
 
 @tool
+@log_call("tool", log_args=True)
 async def get_weather_forecast(city: str, days: int = 5) -> str:
     """Get the daily weather forecast for a city: min/max temperature in °C and
     rain. Only covers about the next 10 days; for trips further away, tell the

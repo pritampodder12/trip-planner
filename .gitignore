@@ -39,7 +39,7 @@ htmlcov/
 checkpoints/
 
 # ---------- Scratch files ----------
-scratch_*.py
+# scratch_*.py/
 
 # ---------- Logs ----------
 *.log
@@ -57,3 +57,5 @@ desktop.ini
 
 # ---------- LangGraph / LangSmith local ----------
 .langgraph_api/
+
+data/

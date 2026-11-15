@@ -29,3 +29,6 @@ class TripState(TypedDict, total=False):
     attempts: int
     validation_errors: list[str]
     warnings: list[str]
+    clarify_rounds: int
+    revisions: int
+    approved: bool

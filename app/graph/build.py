@@ -1,6 +1,7 @@
 from langgraph.graph import END, START, StateGraph
 
 from app.graph.nodes.allocator import city_allocator_node
+from app.graph.nodes.approval import human_review_node, route_after_approval
 from app.graph.nodes.builder import itinerary_builder_node
 from app.graph.nodes.intake import intake_node
 from app.graph.nodes.research import fan_out_research, research_city_node
@@ -17,7 +18,7 @@ from app.graph.nodes.validate import (
 from app.graph.state import TripState
 
 
-def build_graph():
+def build_graph(checkpointer=None):
     builder = StateGraph(TripState)
 
     builder.add_node("intake", intake_node)
@@ -28,15 +29,16 @@ def build_graph():
     builder.add_node("itinerary_builder", itinerary_builder_node)
     builder.add_node("review_itinerary", review_itinerary_node)
     builder.add_node("finalize", finalize_node)
+    builder.add_node("human_review", human_review_node)
 
     builder.add_edge(START, "intake")
     builder.add_edge("intake", "validate_request")
     builder.add_conditional_edges(
         "validate_request",
         route_after_validation,
-        {"ask_user": "ask_user", "city_allocator": "city_allocator"},
+        {"ask_user": "ask_user", "city_allocator": "city_allocator", "give_up": END},
     )
-    builder.add_edge("ask_user", END)
+    builder.add_edge("ask_user", "intake")
 
     # Map: one parallel research_city run per city
     builder.add_conditional_edges("city_allocator", fan_out_research, ["research_city"])
@@ -50,6 +52,11 @@ def build_graph():
         route_after_review,
         {"itinerary_builder": "itinerary_builder", "finalize": "finalize"},
     )
-    builder.add_edge("finalize", END)
+    builder.add_edge("finalize", "human_review")
+    builder.add_conditional_edges(
+        "human_review",
+        route_after_approval,
+        {"itinerary_builder": "itinerary_builder", "done": END},
+    )
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

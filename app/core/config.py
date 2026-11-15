@@ -23,5 +23,8 @@ class Settings(BaseSettings):
 
     llm_temperature: float = 0.2
 
+    checkpoint_db: str = "data/checkpoints.db"
+    log_level: str = "INFO"
+
 
 settings = Settings()
