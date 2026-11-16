@@ -4,6 +4,7 @@ from functools import lru_cache
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
+from app.core.logging_config import log_call
 from app.graph.state import TripState
 from app.schemas.plan import CityPlan
 
@@ -27,6 +28,7 @@ def get_chain():
     return prompt | get_llm().with_structured_output(CityPlan)
 
 
+@log_call("node")
 async def city_allocator_node(state: TripState) -> dict:
     # logger.info(
     #     "[node] city_allocator | cities=%s days=%s",

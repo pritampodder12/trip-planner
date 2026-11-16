@@ -4,6 +4,7 @@ from functools import lru_cache
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
+from app.core.logging_config import log_call
 from app.graph.state import TripState
 from app.schemas.plan import Itinerary
 
@@ -48,6 +49,7 @@ def _format_notes(state: TripState) -> str:
         return "\n\n".join(parts)
 
 
+@log_call("node")
 async def itinerary_builder_node(state: TripState) -> dict:
     # logger.info(
     #     "[node] itinerary_builder | cities=%s",

@@ -4,6 +4,7 @@ from functools import lru_cache
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
+from app.core.logging_config import log_call
 from app.graph.state import TripState
 from app.schemas.trip import TripRequest
 
@@ -31,6 +32,7 @@ async def parse_trip_request(user_text: str) -> TripRequest:
     return await get_chain().ainvoke({"user_text": user_text})
 
 
+@log_call("node")
 async def intake_node(state: TripState) -> dict:
     # logger.info("[node] intake | user_text=%r", state["user_text"])
     request = await parse_trip_request(state["user_text"])

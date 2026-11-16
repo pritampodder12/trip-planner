@@ -42,12 +42,34 @@ class Itinerary(BaseModel):
     budget_note: str | None = Field(default=None, description="Rough budget comment")
 
 
+class ResumeIn(BaseModel):
+    answer: str | None = Field(default=None, max_length=2000)
+    approved: bool | None = None
+    feedback: str | None = Field(default=None, max_length=1000)
+
+
+class RewindIn(BaseModel):
+    checkpoint_id: str
+
+
+class CheckpointOut(BaseModel):
+    checkpoint_id: str
+    step: int | None = None
+    source: str | None = None
+    next: list[str]
+    created_at: str | None = None
+
+
 class TripResponse(BaseModel):
-    status: Literal["needs_input", "complete"]
-    request: TripRequest
+    thread_id: str
+    status: Literal["needs_input", "awaiting_approval", "complete", "incomplete"]
+    request: TripRequest | None = None
     questions: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     attempts: int | None = None
+    revisions: int = 0
+    approved: bool | None = None
+    estimated_total: float | None = None
     city_plan: CityPlan | None = None
     itinerary: Itinerary | None = None

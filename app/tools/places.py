@@ -3,12 +3,14 @@ import logging
 import httpx
 from langchain_core.tools import tool
 
+from app.core.logging_config import log_call
 from app.tools.geo import get_json
 
 logger = logging.getLogger(__name__)
 
 
 @tool
+@log_call("tool", log_args=True)
 async def search_places(city: str, interest: str) -> str:
     """Find places in a city that match one interest, for example city='Jaipur',
     interest='forts'. Returns up to 6 place names with a short description.

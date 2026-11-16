@@ -4,6 +4,7 @@ from math import asin, cos, radians, sin, sqrt
 import httpx
 from langchain_core.tools import tool
 
+from app.core.logging_config import log_call
 from app.tools.geo import geocode
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 @tool
+@log_call("tool", log_args=True)
 async def estimate_travel(origin_city: str, destination_city: str) -> str:
     """Roughly estimate the road distance and driving time between two cities.
     This is an approximation from coordinates, not a live route or a train/flight

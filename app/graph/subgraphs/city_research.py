@@ -7,6 +7,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.core.llm import get_llm
+from app.core.logging_config import log_call
 from app.tools.places import search_places
 from app.tools.travel import estimate_travel
 from app.tools.weather import get_weather_forecast
@@ -36,6 +37,7 @@ def _agent_llm():
     return get_llm().bind_tools(CITY_TOOLS)
 
 
+@log_call("node")
 async def agent_node(state: CityResearchState) -> dict:
     response = await _agent_llm().ainvoke(
         [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]

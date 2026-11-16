@@ -1,8 +1,10 @@
+from app.core.logging_config import log_call
 from app.graph.state import TripState
 
 MAX_ATTEMPTS = 3
 
 
+@log_call("node")
 def review_itinerary_node(state: TripState) -> dict:
     req, plan, itinerary = state["request"], state["city_plan"], state["itinerary"]
     notes = state.get("city_notes", {})
@@ -64,6 +66,7 @@ def route_after_review(state: TripState) -> str:
     return "finalize"
 
 
+@log_call("node")
 def finalize_node(state: TripState) -> dict:
     warnings = list(state.get("warnings", []))
     for e in state.get("validation_errors", []):
