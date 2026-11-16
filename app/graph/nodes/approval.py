@@ -48,6 +48,7 @@ def human_review_node(state: TripState) -> dict:
         "revisions": revisions,
         "attempts": 0,
         "validation_errors": [f"The traveller asked for the change: {feedback}"],
+        "feedback_log": state.get("feedback_log", []) + [feedback],  # new
     }
     if revisions >= MAX_REVISIONS:
         logger.warning(

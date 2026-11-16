@@ -5,6 +5,8 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
 from app.core.logging_config import log_call
+from app.core.memory import format_profile
+from app.core.progress import emit_progress
 from app.graph.state import TripState
 from app.schemas.plan import Itinerary
 
@@ -21,11 +23,13 @@ prompt = ChatPromptTemplate.from_messages(
             "together in the budget currency; the sum over all days must stay within the "
             "budget. Use ONLY places named in the research notes; if something is missing "
             "write 'to be confirmed'. Mention weather and travel time where the notes "
-            "provide them.",
+            "provide them. Respect the traveler profile (diet, pace, dislikes, past change requests) "
+            "when choosing activities.",
         ),
         (
             "human",
             "Trip request:\n{request_json}\n\nCity plan:\n{plan_json}\n\n"
+            "\n\nTraveler profile:\n{profile}"
             "Research notes per city:\n{notes}\n\nFeedback:\n{feedback}",
         ),
     ]
@@ -51,10 +55,9 @@ def _format_notes(state: TripState) -> str:
 
 @log_call("node")
 async def itinerary_builder_node(state: TripState) -> dict:
-    # logger.info(
-    #     "[node] itinerary_builder | cities=%s",
-    #     [s.city for s in state["city_plan"].stays],
-    # )
+    emit_progress(
+        "build", f"Building the itinerary (attempt {state.get('attempts', 0) + 1})"
+    )
     errors = state.get("validation_errors") or []
     if errors and state.get("itinerary"):
         feedback = (
@@ -72,6 +75,7 @@ async def itinerary_builder_node(state: TripState) -> dict:
             "plan_json": state["city_plan"].model_dump_json(),
             "notes": _format_notes(state),
             "feedback": feedback,
+            "profile": format_profile(state.get("preferences")),
         }
     )
     # logger.info("[node] itinerary_builder | done | total_days=%d", len(itinerary.days))

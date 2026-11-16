@@ -4,7 +4,8 @@ from app.graph.nodes.allocator import city_allocator_node
 from app.graph.nodes.approval import human_review_node, route_after_approval
 from app.graph.nodes.builder import itinerary_builder_node
 from app.graph.nodes.intake import intake_node
-from app.graph.nodes.research import fan_out_research, research_city_node
+from app.graph.nodes.preferences import load_preferences_node, save_preferences_node
+from app.graph.nodes.research import fan_out_research
 from app.graph.nodes.review import (
     finalize_node,
     review_itinerary_node,
@@ -16,22 +17,29 @@ from app.graph.nodes.validate import (
     validate_request_node,
 )
 from app.graph.state import TripState
+from app.graph.subgraphs.city_research import build_city_research_graph
 
 
-def build_graph(checkpointer=None):
+def build_graph(checkpointer=None, store=None):
     builder = StateGraph(TripState)
 
     builder.add_node("intake", intake_node)
     builder.add_node("validate_request", validate_request_node)
     builder.add_node("ask_user", ask_user_node)
     builder.add_node("city_allocator", city_allocator_node)
-    builder.add_node("research_city", research_city_node)
     builder.add_node("itinerary_builder", itinerary_builder_node)
     builder.add_node("review_itinerary", review_itinerary_node)
     builder.add_node("finalize", finalize_node)
     builder.add_node("human_review", human_review_node)
+    builder.add_node("load_preferences", load_preferences_node)
+    builder.add_node(
+        "research_city", build_city_research_graph()
+    )  # a compiled subgraph as a node
+    builder.add_node("save_preferences", save_preferences_node)
 
-    builder.add_edge(START, "intake")
+    # builder.add_edge(START, "intake")
+    builder.add_edge(START, "load_preferences")
+    builder.add_edge("load_preferences", "intake")
     builder.add_edge("intake", "validate_request")
     builder.add_conditional_edges(
         "validate_request",
@@ -56,7 +64,8 @@ def build_graph(checkpointer=None):
     builder.add_conditional_edges(
         "human_review",
         route_after_approval,
-        {"itinerary_builder": "itinerary_builder", "done": END},
+        {"itinerary_builder": "itinerary_builder", "done": "save_preferences"},
     )
+    builder.add_edge("save_preferences", END)
 
-    return builder.compile(checkpointer=checkpointer)
+    return builder.compile(checkpointer=checkpointer, store=store)

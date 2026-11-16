@@ -5,6 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
 from app.core.logging_config import log_call
+from app.core.progress import emit_progress
 from app.graph.state import TripState
 from app.schemas.plan import CityPlan
 
@@ -30,11 +31,7 @@ def get_chain():
 
 @log_call("node")
 async def city_allocator_node(state: TripState) -> dict:
-    # logger.info(
-    #     "[node] city_allocator | cities=%s days=%s",
-    #     state["request"].cities,
-    #     state["request"].days,
-    # )
+    emit_progress("plan", "Splitting the days across your cities")
     req = state["request"]
     plan = await get_chain().ainvoke({"request_json": req.model_dump_json()})
     diff = req.days - sum(s.days for s in plan.stays)

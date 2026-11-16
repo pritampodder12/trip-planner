@@ -92,12 +92,34 @@ async def _load(graph, thread_id: str):
     return snapshot
 
 
+def resume_value(pending: dict, body: ResumeIn):
+    """Validate the body against the pending interrupt; return the value for Command(resume=...)."""
+    kind = pending.get("type")
+    if kind == "questions":
+        if not body.answer or not body.answer.strip():
+            raise HTTPException(
+                status_code=422, detail="'answer' is required to answer the questions."
+            )
+        return body.answer.strip()
+    if kind == "approval":
+        if body.approved is None:
+            raise HTTPException(
+                status_code=422, detail="'approved' (true/false) is required."
+            )
+        if body.approved is False and not (body.feedback or "").strip():
+            raise HTTPException(
+                status_code=422, detail="'feedback' is required when approved is false."
+            )
+        return {"approved": body.approved, "feedback": body.feedback}
+    raise HTTPException(status_code=500, detail=f"Unknown interrupt type: {kind}")
+
+
 @router.post("", response_model=TripResponse)
 async def create_trip(body: TripIn, request: Request) -> TripResponse:
     graph = request.app.state.graph
     thread_id = uuid.uuid4().hex
     logger.info("POST /trips: new thread_id=%s text=%r", thread_id, body.text[:100])
-    await _run(graph, {"user_text": body.text}, thread_id)
+    await _run(graph, {"user_text": body.text, "user_id": body.user_id}, thread_id)
     snapshot = await _load(graph, thread_id)
     response = _build_response(thread_id, snapshot)
     logger.info("POST /trips: thread_id=%s status=%s", thread_id, response.status)
@@ -126,24 +148,7 @@ async def resume_trip(thread_id: str, body: ResumeIn, request: Request) -> TripR
 
     kind = pending.get("type")
     logger.info("POST /trips/%s/resume: pending type=%s", thread_id, kind)
-    if kind == "questions":
-        if not body.answer or not body.answer.strip():
-            raise HTTPException(
-                status_code=422, detail="'answer' is required to answer the questions."
-            )
-        value = body.answer.strip()
-    elif kind == "approval":
-        if body.approved is None:
-            raise HTTPException(
-                status_code=422, detail="'approved' (true/false) is required."
-            )
-        if body.approved is False and not (body.feedback or "").strip():
-            raise HTTPException(
-                status_code=422, detail="'feedback' is required when approved is false."
-            )
-        value = {"approved": body.approved, "feedback": body.feedback}
-    else:
-        raise HTTPException(status_code=500, detail=f"Unknown interrupt type: {kind}")
+    value = resume_value(pending, body)
 
     await _run(graph, Command(resume=value), thread_id)
     snapshot = await _load(graph, thread_id)
