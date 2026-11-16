@@ -66,7 +66,9 @@ def _build_response(thread_id: str, snapshot) -> TripResponse:
     )
 
 
-async def _run(graph, graph_input, thread_id: str, checkpoint_id: str | None) -> None:
+async def _run(
+    graph, graph_input, thread_id: str, checkpoint_id: str | None = None
+) -> None:
     config = _config(thread_id, checkpoint_id)
     started = time.perf_counter()
     with get_usage_metadata_callback() as usage:
