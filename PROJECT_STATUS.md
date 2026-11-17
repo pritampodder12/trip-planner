@@ -1,9 +1,10 @@
-# Trip Planner (LangGraph + FastAPI + LLM): Project Status
+# Trip Planner (LangGraph + FastAPI + LLM + Telegram Bot): Project Status
 
 > Keep this file in the repo root. Update the tracker after every phase.
 > To resume in any new session, paste the "Resume prompt" at the bottom.
-> **Last updated:** after Phase 4 (Phases 0 to 4 built; next is Phase 5).
+> **Last updated:** after Phase 5 + Telegram Bot (Phases 0 to 5 built; next is Phase 6).
 > Section 7 is the step-by-step guide for testing the `/trips` endpoints.
+> Section 8b covers running and testing the Telegram bot.
 
 ## 1. Project summary
 
@@ -29,8 +30,9 @@
 | 2 | Tools and routing (ReAct, conditional edges) | 1 week | **DONE** |
 | 3 | Parallelism and loops (`Send`, reducers, validator loop) | 1 week | **DONE** |
 | 4 | Persistence and human-in-the-loop (checkpointer, `interrupt`, resume, time travel) | 1 week | **DONE** (confirm the HTTP walkthrough in section 7 and the open items in section 14) |
-| 5 | Streaming, memory, subgraphs | 1 week | **NEXT** |
-| 6 | Guardrails and hardening | 4-5 days | TODO |
+| 5 | Streaming, memory, subgraphs | 1 week | **DONE** |
+| 5b | Telegram Bot (frontend on top of Phase 5 API) | extra | **DONE** |
+| 6 | Guardrails and hardening | 4-5 days | **NEXT** |
 | 7 | Advanced: multi-agent, handoffs, agentic RAG, multimodal, evals, deploy | 1.5-2 weeks | TODO |
 
 ## 3. What is built so far
@@ -73,7 +75,6 @@ State (`TripState`, TypedDict), nodes returning only changed keys, graph built i
 | Tests | `tests/test_review.py` |
 
 ### Phase 4: Persistence and human-in-the-loop (DONE)
-
 | Area | Done |
 |---|---|
 | Checkpointer | `AsyncSqliteSaver` opened with `async with` in the FastAPI `lifespan`; graph compiled with it (`build_graph(checkpointer)`); DB at `data/checkpoints.db` |
@@ -88,6 +89,42 @@ State (`TripState`, TypedDict), nodes returning only changed keys, graph built i
 | Tests | `tests/test_routing.py` for the two new routers |
 | Scratch aids | `scratch_interrupt.py` (pause/resume demo with `InMemorySaver`), `scratch_graph.py` (per-node timings) |
 
+### Phase 5: Streaming, memory, subgraphs (DONE)
+
+| Area | Done |
+|---|---|
+| SSE streaming | `app/api/trip_stream.py`; `POST /trips/stream` starts a new trip and streams events; `POST /trips/{id}/resume/stream` resumes and streams. Uses `graph.astream(stream_mode=["updates","custom"], subgraphs=True)` |
+| Stream event types | `started` (thread opened), `progress` (custom events from nodes), `node` (top-level node name on each update), `result` (final `TripResponse`), `error` (recursion or unexpected failure) |
+| Progress helper | `app/core/progress.py`; `emit_progress(stage, message, **extra)` calls `get_stream_writer()` inside the graph; silently no-ops in tests and scripts |
+| Nodes that emit progress | `intake_node` ("Reading your request"), `city_prepare_node` ("Researching {city}"), `city_finalize_node` ("Finished {city}: N place(s) found"), `itinerary_builder_node` ("Building the itinerary (attempt N)") |
+| Long-term user memory | `app/core/memory.py`: `read_profile`, `write_preferences`, `write_history`, `delete_profile`, `update_history`, `merge_unique`, `format_profile` |
+| Store integration | `InMemoryStore` created in FastAPI `lifespan` and passed to `build_graph(checkpointer, store)`. **Note:** lost on server restart; Postgres store planned for Phase 7 |
+| Preference nodes | `load_preferences_node` (START → first node; reads Store via `runtime.store`); `save_preferences_node` (runs after approval; writes learned history — cities, interests, feedback log) |
+| Preferences in prompts | `format_profile(state["preferences"])` injected into `itinerary_builder_node` and `city_prepare_node` prompts |
+| User preferences API | `GET /users/{id}/preferences`, `PUT /users/{id}/preferences`, `DELETE /users/{id}/preferences` in `app/api/users.py`; anonymous user blocked (400) |
+| Schemas | `app/schemas/preferences.py`: `PreferencesIn` (diet, pace, budget_style, dislikes, notes), `PreferencesOut` |
+| City research as real subgraph | `app/graph/subgraphs/city_research.py` is now a compiled `StateGraph` with `input_schema=CityTask, output_schema=CityOutput`; registered via `builder.add_node("research_city", build_city_research_graph())` — no checkpointer (inherits parent's) |
+| Subgraph nodes | `city_prepare_node` (builds the HumanMessage from task payload), `city_agent_node` (ReAct LLM step), `ToolNode` (runs tools), `city_finalize_node` (extracts place names, emits progress, returns `city_notes`) |
+| `feedback_log` | New state field; edit requests collected during `human_review` and written to learned history by `save_preferences_node` |
+| Tests | `tests/test_memory.py`: `merge_unique`, `update_history`, `format_profile`, store round-trip, `emit_progress` no-op outside graph |
+| Graph edges (updated) | `START → load_preferences → intake → ...`; `human_review → (approved/cap) → save_preferences → END` |
+
+### Phase 5b: Telegram Bot (DONE)
+
+| Area | Done |
+|---|---|
+| Library | `python-telegram-bot[httpx]` added to deps |
+| Folder | `telegram-bot/` at project root (sibling of `app/`) |
+| `sessions.py` | In-memory `dict[chat_id → thread_id]`; `get_thread`, `set_thread`, `clear_thread`, `has_thread` |
+| `client.py` | `httpx.AsyncClient` wrappers for `create_trip`, `resume_trip`, `approve_trip`; timeout 120 s; reads `TRIP_API_URL` from env |
+| `formatter.py` | `format_questions` (clarification flow) and `format_itinerary` (day-by-day plan with costs, warnings, assumptions); hard truncates at 4000 chars |
+| `handlers.py` | `handle_start` (`/start`), `handle_message` (3 cases: feedback / new trip / clarification answer), `handle_callback` (✅ Approve / ✏️ Request Changes), `_handle_response` (dispatches on status) |
+| `bot.py` | `ApplicationBuilder` entry point; `sys.path.insert` so imports work when run from project root; `load_dotenv()` |
+| Approve flow fix | After approval (`complete` status), `_handle_response` first renders the final itinerary with `format_itinerary`, then sends the "✅ Trip confirmed!" message |
+| `AWAITING_FEEDBACK` flag | `context.user_data["awaiting_feedback"]` set when user taps ✏️; next plain-text message is treated as edit feedback, not a new trip |
+| Env vars added | `TELEGRAM_BOT_TOKEN` and `TRIP_API_URL` in `.env` and `.env.example` |
+| Zero changes to `app/` | Bot is a pure HTTP client talking to the existing FastAPI; all graph logic stays in `app/` |
+
 ### LLM provider switch and latency notes
 
 | Topic | Note |
@@ -100,52 +137,73 @@ State (`TripState`, TypedDict), nodes returning only changed keys, graph built i
 
 ## 4. Current graph
 
-```
-START → intake → validate_request ─┬─ complete ──────────► city_allocator ──Send──► research_city (parallel, one per city)
-            ▲                      ├─ missing, round < 3 ► ask_user  ⏸ interrupt(questions)      │ fan-in
-            └──────────────────────┘   (answer appended to user_text)                            ▼
-                                   └─ missing, round = 3 ► END (status "incomplete")     ┌──► itinerary_builder
-                                                                                         │          ▼
-                                                                                         │   review_itinerary (plain Python)
-                                                                                         │          │
-                                                                          errors, attempts < 3 ─────┘          no errors / cap reached
-                                                                                                                      ▼
-                                                                                                                  finalize
-                                                                                                                      ▼
-                                                                                                         human_review  ⏸ interrupt(approval)
-                                                                                                    edit (revisions < 3) │      │ approved / cap
-                                                                                         itinerary_builder ◄─────────────┘      ▼
-                                                                                                                              END
-```
+\START → load_preferences → intake → validate_request ─┬─ complete ──────► city_allocator ──Send──► research_city subgraph (parallel, one per city)
+                               ▲                      ├─ missing, round < 3 ► ask_user  ⏸ interrupt(questions)        | fan-in
+                               └──────────────────────┘   (answer appended to user_text)                              ▼
+                                                       └─ missing, round = 3 ► END (incomplete)        ┌──► itinerary_builder
+                                                                                                          |          ▼
+                                                                                                          |   review_itinerary (plain Python)
+                                                                                                          |          |
+                                                                                   errors, attempts < 3 ─┘     no errors / cap reached
+                                                                                                                       ▼
+                                                                                                                   finalize
+                                                                                                                       ▼
+                                                                                                      human_review  ⏸ interrupt(approval)
+                                                                                                 edit (revisions < 3) |      | approved / cap
+                                                                                      itinerary_builder <────────────┘      ▼
+                                                                                                                    save_preferences → END
 
+research_city subgraph (compiled StateGraph, inherits parent checkpointer):
+  START → prepare → agent ⇄ tools (ToolNode) → finalize → END
+  (each node emits progress events; city_notes merged back via merge_dicts reducer)
+\
 ## 5. Current project structure
 
 ```
 trip-planner/
 ├── app/
-│   ├── main.py                 # logging setup, lifespan (AsyncSqliteSaver + compile graph), routers, /health
+│   ├── main.py                     # logging setup, lifespan (AsyncSqliteSaver + InMemoryStore + compile graph), routers, /health
 │   ├── api/
-│   │   ├── parse.py            # POST /parse-request
-│   │   ├── trips.py            # start, status, resume, history, rewind; token usage logging
-│   │   └── tools.py            # GET /tools/weather (debug, optional)
+│   │   ├── parse.py                # POST /parse-request
+│   │   ├── trips.py                # start, status, resume, history, rewind; token usage logging
+│   │   ├── trip_stream.py          # POST /trips/stream, POST /trips/{id}/resume/stream (SSE)
+│   │   ├── users.py                # GET/PUT/DELETE /users/{id}/preferences
+│   │   └── tools.py                # GET /tools/weather (debug, optional)
 │   ├── core/
-│   │   ├── config.py           # Settings (llm, azure_openai_*, weather_mock, checkpoint_db, log_level)
-│   │   ├── llm.py              # LLM factory (Azure OpenAI gpt-5-mini; reasoning_effort)
-│   │   └── logging_config.py   # setup_logging(), log_call decorator
+│   │   ├── config.py               # Settings (llm, azure_openai_*, weather_mock, checkpoint_db, log_level)
+│   │   ├── llm.py                  # LLM factory (Azure OpenAI gpt-5-mini; reasoning_effort)
+│   │   ├── logging_config.py       # setup_logging(), log_call decorator
+│   │   ├── memory.py               # read_profile, write_preferences, write_history, update_history, format_profile
+│   │   └── progress.py             # emit_progress() helper (get_stream_writer wrapper, no-op outside graph)
 │   ├── schemas/
-│   │   ├── trip.py             # TripRequest
-│   │   └── plan.py             # TripIn, CityStay, CityPlan, DayPlan, Itinerary, TripResponse, ResumeIn, RewindIn, CheckpointOut
-│   ├── tools/                  # __init__ (ALL_TOOLS), geo, weather, places, travel, currency
+│   │   ├── trip.py                 # TripRequest
+│   │   ├── plan.py                 # TripIn, CityStay, CityPlan, DayPlan, Itinerary, TripResponse, ResumeIn, RewindIn, CheckpointOut
+│   │   └── preferences.py          # PreferencesIn, PreferencesOut
+│   ├── tools/                      # __init__ (ALL_TOOLS), geo, weather, places, travel, currency
 │   ├── graph/
-│   │   ├── state.py            # TripState (+ clarify_rounds, revisions, approved), CityNotes, merge_dicts
-│   │   ├── build.py            # build_graph(checkpointer=None)
-│   │   ├── subgraphs/city_research.py
-│   │   └── nodes/              # intake, validate (ask_user interrupt), allocator, research, builder, review, approval
-│   ├── guardrails/  rag/  graph/agents/   # empty, filled in later phases
+│   │   ├── state.py                # TripState (+ preferences, feedback_log), CityNotes, merge_dicts
+│   │   ├── build.py                # build_graph(checkpointer, store); 10 nodes including load/save_preferences
+│   │   ├── subgraphs/
+│   │   │   └── city_research.py    # compiled subgraph: CityTask→CityOutput; prepare→agent⇄tools→finalize
+│   │   └── nodes/
+│   │       ├── intake.py           # emits progress
+│   │       ├── validate.py         # ask_user interrupt
+│   │       ├── allocator.py
+│   │       ├── builder.py          # injects format_profile(); emits progress
+│   │       ├── review.py
+│   │       ├── approval.py         # records feedback_log
+│   │       └── preferences.py      # load_preferences_node, save_preferences_node
+│   ├── guardrails/  rag/  graph/agents/   # empty, filled in Phase 6/7
+├── telegram-bot/               # standalone Telegram frontend (zero changes to app/)
+│   ├── bot.py                  # entry point; ApplicationBuilder, polling
+│   ├── handlers.py             # handle_start, handle_message, handle_callback, _handle_response
+│   ├── client.py               # httpx wrappers: create_trip, resume_trip, approve_trip (120s timeout)
+│   ├── formatter.py            # format_questions, format_itinerary (Telegram Markdown, 4000-char cap)
+│   └── sessions.py             # in-memory dict[chat_id → thread_id] + awaiting_feedback flag
 ├── data/checkpoints.db         # created at runtime, git-ignored
-├── tests/                      # test_review.py, test_routing.py
+├── tests/                      # test_review.py, test_routing.py, test_memory.py
 ├── evals/
-├── scratch_tools.py  scratch_graph.py  scratch_interrupt.py   # local debugging only (git-ignored)
+├── scratch_tools.py  scratch_graph.py  scratch_interrupt.py  scratch_stream.py
 ├── .env  .env.example  .gitignore
 ├── pyproject.toml  uv.lock  .python-version
 └── PROJECT_STATUS.md
@@ -157,10 +215,13 @@ trip-planner/
 |---|---|
 | Install / sync deps | `uv sync` |
 | Run API (dev) | `uv run uvicorn app.main:app --reload` |
+| Run Telegram bot | `uv run python telegram-bot/bot.py` |
 | Swagger UI | `http://127.0.0.1:8000/docs` |
+| Test SSE stream (curl) | `curl -N -X POST http://localhost:8000/trips/stream -H "Content-Type: application/json" -d "{"text":"5 days Jaipur"}"` |
 | Test tools alone | `uv run scratch_tools.py` |
 | Graph node by node, with timings | `uv run scratch_graph.py` |
 | Pause/resume demo without HTTP | `uv run scratch_interrupt.py` |
+| SSE stream demo | `uv run scratch_stream.py` |
 | Unit tests | `uv run pytest` |
 | Lint | `uv run ruff check .` |
 | Find `@log_call` written without parentheses | `Get-ChildItem app -Recurse -Filter *.py \| Select-String '@log_call\s*$'` |
@@ -320,6 +381,17 @@ Covers the reviewer (`test_review.py`) and the two routers (`test_routing.py`). 
 | Logging convention | Every module gets `logger = logging.getLogger(__name__)`; nodes get `@log_call("node")`, tools get `@log_call("tool", log_args=True)` under `@tool` |
 | Pass `config` to nested runs | Keeps callbacks (token usage, tracing) visible inside sub-invocations |
 | Tools return errors as text | The LLM can adapt; retry only temporary errors (timeouts, 429, 5xx) |
+| `astream` with `stream_mode` | Returns an async iterator of events; `updates` = node outputs, `custom` = `get_stream_writer()` payloads |
+| `subgraphs=True` in `astream` | Events from nested compiled subgraphs are included; each part is `(namespace, mode, data)` |
+| `get_stream_writer()` | Injects a writer into a node; `writer({...})` emits a custom SSE event; no-op outside a graph run |
+| SSE (`text/event-stream`) | Each event is `event: <name>\ndata: <json>\n\n`; `StreamingResponse` streams it without buffering |
+| LangGraph `Store` | Key-value store with namespaces; `aput`, `aget`, `adelete`; injected via `runtime.store` in nodes |
+| `InMemoryStore` | Implements `BaseStore`; lost on restart; useful for development before Postgres |
+| `input_schema` / `output_schema` on subgraph | Restricts what a compiled subgraph reads from and writes back to the parent; avoids state bleed |
+| Telegram bot (python-telegram-bot) | `ApplicationBuilder().token().build()`; `CommandHandler`, `MessageHandler`, `CallbackQueryHandler`; fully async |
+| `InlineKeyboardMarkup` + `CallbackQueryHandler` | Render buttons under a message; `callback_data` identifies which button was tapped |
+| `context.user_data` | Per-chat ephemeral dict in python-telegram-bot; survives across messages in one session |
+| Bot as pure HTTP client | The bot has zero LangGraph knowledge; it just POSTs to your FastAPI and renders JSON — clean separation |
 
 ## 9. Lessons learned (bugs and fixes)
 
@@ -338,15 +410,21 @@ Covers the reviewer (`test_review.py`) and the two routers (`test_routing.py`). 
 | `ValueError: No messages found in input state` | Node returned `{"message": ...}` instead of `{"messages": ...}` | Use the plural key |
 | `AttributeError: 'dict' object has no attribute '__module__'` in `logging_config.py` | `@log_call` used without parentheses on `human_review_node`, so the function became the `kind` argument | Write `@log_call("node")`, or make the decorator accept both forms |
 
+| After approve in Telegram, only "Trip confirmed!" was shown | `_handle_response` for `complete` status never rendered the itinerary | Show `format_itinerary(data)` first, then the confirmation message |
+| Imports between files in `telegram-bot/` failed when running from project root | Python path didn't include `telegram-bot/` | Add `sys.path.insert(0, os.path.dirname(__file__))` at the top of `bot.py` |
+| `emit_progress` raised an exception outside a graph run (in tests) | `get_stream_writer()` requires an active graph context | Wrap in `try/except` and return silently; tested with `test_emit_progress_outside_graph_is_a_noop` |
+
 Recurring pattern: **misspelled keys, variable names and missing parentheses fail late and far from the cause.** Read the last lines of the traceback (they usually name the node: `During task with name '...'`) and search the codebase for the name.
 
 ## 10. Known limitations of the current system
 
 | Limitation | Fixed in |
 |---|---|
-| No streaming; the first response takes a while | Phase 5 |
-| City mini-graph is invoked from inside a node, not registered as a true subgraph | Phase 5 |
-| No long-term memory of user preferences | Phase 5 |
+| ~~No streaming; the first response takes a while~~ | ✅ Phase 5 (SSE stream endpoints) |
+| ~~City mini-graph is invoked from inside a node, not registered as a true subgraph~~ | ✅ Phase 5 (compiled subgraph with input/output schemas) |
+| ~~No long-term memory of user preferences~~ | ✅ Phase 5 (LangGraph Store + load/save preference nodes) |
+| `InMemoryStore` is lost on server restart | Phase 7 (Postgres store) |
+| Telegram bot `sessions.py` is in-memory; restarting the bot loses active chat sessions | Phase 7 or add SQLite session table |
 | Grounding is only a warning; the LLM can still invent details | Phase 6 (output guardrail) |
 | No input guardrails (off-topic, prompt injection) | Phase 6 |
 | Concurrent resumes of the same thread aren't guarded | Phase 6 or 7 |
@@ -356,16 +434,18 @@ Recurring pattern: **misspelled keys, variable names and missing parentheses fai
 | Costs are LLM estimates, not real prices | Accepted; budget check is a sanity check |
 | Places come from Wikipedia search, so quality is uneven | Phase 7 (better source or RAG) |
 | `convert_currency` is unused by the graph | Phase 6 or 7 |
-| Pydantic models in checkpoints trigger "unregistered type" warnings | Optional: register them via `JsonPlusSerializer(allowed_msgpack_modules=[...])`; a list makes everything else strict (plain dicts), so list all models |
+| Pydantic models in checkpoints trigger "unregistered type" warnings | Optional: register via `JsonPlusSerializer` |
 | No HTTP-level automated tests | Phase 6 or 7 |
+| Telegram bot has no `/help` command or error recovery UX beyond "send /start" | Nice-to-have before Phase 6 |
 
 ## 11. Remaining phases in detail
 
 | Phase | Build | Key concepts | Planned API additions | Done when... |
 |---|---|---|---|---|
-| **5** | Stream progress per node over SSE; long-term preferences (diet, budget style, pace) read at intake and written at the end; register the city research mini-graph as a real subgraph | `astream` modes (`updates`, `messages`), SSE, Store and namespaces, subgraphs and state mapping | `GET /trips/{id}/stream`, `GET/PUT /users/{id}/preferences` | Progress streams live; preferences persist across trips; subgraph works with `Send` and checkpoints |
-| **6** | Input / tool / output guardrails; retries, fallbacks, timeouts; token-budget guardrail; request IDs, rate limiting; HTTP-level tests. Compare with provider-native guardrails | Guardrail nodes, grounding check, safe failure | Global error handlers | Bad inputs rejected; every stop grounded in tool results |
-| **7** | Supervisor + Flight/Hotel/Activities agents; Booking handoff; agentic RAG (retrieve, grade, rewrite); image input; evals; LangSmith tracing; auth; Docker; Postgres checkpointer; deploy | Supervisor, handoffs, `Command(graph=Command.PARENT)`, agentic RAG, multimodal, evals, deployment | `POST /trips/{id}/book`, `POST /trips/{id}/upload`, `GET /trips/{id}/export`, `POST /auth/login` | Team plans, RAG answers visa questions, evals pass, runs in Docker |
+| **5** ✅ | SSE streaming (`astream`, `get_stream_writer`); `InMemoryStore` for user preferences (load at intake, save after approval); city research registered as a real compiled subgraph with `input_schema`/`output_schema` | `astream` modes, SSE, Store + namespaces, subgraph schemas | `POST /trips/stream`, `POST /trips/{id}/resume/stream`, `GET/PUT/DELETE /users/{id}/preferences` | ✅ Progress streams live; preferences persist across trips; subgraph works with `Send` and checkpoints |
+| **5b** ✅ | Telegram bot as a pure HTTP client on top of the Phase 5 API | `python-telegram-bot`, inline keyboards, `context.user_data`, `httpx.AsyncClient` | n/a (bot calls existing endpoints) | ✅ Full trip planning flow works in Telegram: start → clarify → itinerary → approve/edit → confirm |
+| **6** | Input / tool / output guardrails; retries, fallbacks, timeouts; token-budget guardrail; request IDs, rate limiting; HTTP-level tests | Guardrail nodes, grounding check, safe failure | Global error handlers | Bad inputs rejected; every stop grounded in tool results |
+| **7** | Supervisor + Flight/Hotel/Activities agents; agentic RAG; image input; evals; LangSmith tracing; auth; Docker; Postgres checkpointer + store; deploy | Supervisor, handoffs, `Command(graph=Command.PARENT)`, agentic RAG, multimodal, evals, deployment | `POST /trips/{id}/book`, `POST /trips/{id}/upload`, `GET /trips/{id}/export`, `POST /auth/login` | Team plans, RAG answers visa questions, evals pass, runs in Docker |
 
 ## 12. Coverage map
 
@@ -376,8 +456,11 @@ Recurring pattern: **misspelled keys, variable names and missing parentheses fai
 | Tools, ReAct, conditional edges, `add_messages` | 2 | Done |
 | `Send`, custom reducers, validator loop, retry cap | 3 | Done |
 | Checkpointer, threads, `interrupt`, resume, time travel | 4 | Done |
-| Streaming, Store, subgraphs | 5 | Next |
-| Guardrails, error handling | 6 | Todo |
+| Streaming (`astream`, SSE, `get_stream_writer`) | 5 | Done |
+| LangGraph Store, user preferences, load/save nodes | 5 | Done |
+| Compiled subgraph with input/output schemas | 5 | Done |
+| Telegram bot (python-telegram-bot, httpx client) | 5b | Done |
+| Guardrails, error handling | 6 | Next |
 | Multi-agent, handoffs, agentic RAG, multimodal, evals, deployment | 7 | Todo |
 
 ## 13. Decisions and conventions
@@ -403,18 +486,17 @@ Recurring pattern: **misspelled keys, variable names and missing parentheses fai
 | Scratch scripts named `scratch_*.py`; `data/` and `*.db` git-ignored | Keep local debugging and state out of git |
 | Never commit `.env`; commit `.env.example` | Secrets safety |
 
-## 14. Open items before Phase 5
+## 14. Open items before Phase 6
 
 | Item | Status |
 |---|---|
-| Run the HTTP walkthrough in section 7 (at least tests 2, 4, 5, 6, 7, 8, 9, 10, 11) | To confirm |
-| Confirm `@log_call` is written with parentheses everywhere (command in section 6) and applied to all nodes and the four tools | To check |
-| Update `.env.example` with `CHECKPOINT_DB=` and `LOG_LEVEL=` and the Azure variable names (empty values) | To do |
-| `.gitignore` contains `data/` and `*.db`; `git status` shows no `.env` or `data/` | To check |
-| `uv run pytest` passes (reviewer and routing tests) | To check |
-| Negative-flow tests 12 to 23 in section 7 | Run before Phase 6 at the latest |
-| Confirm Python version (`uv run python --version`) and pin 3.12 if you prefer | Optional |
-| Commit: `git commit -m "phase 4: checkpointer, interrupts, resume, time travel, logging"` | To do |
+| `uv run pytest` passes all three test files (review, routing, memory) | To confirm |
+| Negative-flow tests 12–23 in section 7 (bad checkpoint, revision cap, etc.) | Run before Phase 6 |
+| Run the full Telegram bot flow end-to-end: start → clarification → itinerary → edit × 1 → approve | To confirm |
+| Confirm `InMemoryStore` preferences survive a re-plan (new trip same `user_id`) | To confirm |
+| `.gitignore` contains `data/`, `*.db`, `.env`; `telegram-bot/sessions.py` is never committed (it has no secrets, but it's ephemeral state) | To check |
+| Commit: `git commit -m "phase 5: SSE streaming, user preferences, city research as real subgraph, telegram bot"` | To do |
+| Decide: keep `telegram-bot/` in the same repo or move to its own repo (fine either way for learning) | To decide |
 
 ## 15. Resume prompt (paste into a new session)
 
@@ -428,23 +510,35 @@ explanations, and exam tips. In every new file add logging (module logger,
 @log_call("node") on nodes, @log_call("tool", log_args=True) under @tool,
 and info logs for router decisions and endpoints).
 
-Phases 0 to 4 are complete: structured intake; validate_request in plain Python;
-ask_user as a real interrupt that loops back to intake (max 3 rounds);
-city_allocator; parallel per-city research with Send, a merge_dicts reducer and a
-per-city ReAct mini-graph with four tools; a builder with feedback; a plain-Python
-reviewer with a retry loop capped at 3; a human_review interrupt for approve or
-edit (max 3 revisions); an AsyncSqliteSaver checkpointer opened in the FastAPI
-lifespan; endpoints POST /trips, GET /trips/{id}, POST /trips/{id}/resume,
-GET /trips/{id}/history, POST /trips/{id}/rewind; token usage and node logging.
-Structure, concepts, lessons, decisions and the /trips test guide are in
-PROJECT_STATUS.md (pasted below).
+Phases 0 to 5 are complete, plus a Telegram bot frontend (Phase 5b).
 
-Start Phase 5: add streaming of per-node progress over SSE (GET
-/trips/{id}/stream, using astream with the updates and messages modes, and
-working with the interrupt/resume flow), add long-term user preferences with a
-LangGraph Store (read at intake, written at the end, GET/PUT
-/users/{id}/preferences), and register the city research mini-graph as a real
-subgraph that still works with Send and the checkpointer.
+Phase 5 added:
+- SSE streaming via POST /trips/stream and POST /trips/{id}/resume/stream
+  (graph.astream with stream_mode=["updates","custom"], subgraphs=True);
+  emit_progress() helper in app/core/progress.py using get_stream_writer()
+- Long-term user preferences via InMemoryStore (Phase 7 will switch to Postgres):
+  load_preferences_node (START), save_preferences_node (before END);
+  format_profile() injected into builder and city_research prompts;
+  GET/PUT/DELETE /users/{id}/preferences endpoints
+- City research registered as a real compiled subgraph with input_schema=CityTask,
+  output_schema=CityOutput; inherits parent checkpointer; no changes to Send fan-out
+- feedback_log state field: edit requests collected during human_review and saved
+  to learned history by save_preferences_node
+- Tests: tests/test_memory.py (merge_unique, update_history, store round-trip,
+  emit_progress no-op)
+
+Phase 5b (Telegram bot) added:
+- telegram-bot/ folder: bot.py (entry point), handlers.py, client.py (httpx,
+  120s timeout), formatter.py (Telegram Markdown, 4000-char truncation),
+  sessions.py (in-memory chat_id → thread_id map)
+- Zero changes to app/; bot is a pure HTTP client talking to the FastAPI
+- Full flow: /start → plain text → needs_input/awaiting_approval/complete/incomplete
+- Inline keyboard: Approve / Request Changes; AWAITING_FEEDBACK flag in
+  context.user_data for the edit feedback round-trip
+- Bug fixed: complete status now shows the final itinerary before "Trip confirmed!"
+
+Structure, all concepts, lessons, decisions and open items are in
+PROJECT_STATUS.md (pasted below). Start Phase 6.
 
 [paste the contents of PROJECT_STATUS.md here]
 ```
