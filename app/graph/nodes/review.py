@@ -1,4 +1,5 @@
 from app.core.logging_config import log_call
+from app.core.progress import emit_progress
 from app.graph.state import TripState
 
 MAX_ATTEMPTS = 3
@@ -56,7 +57,10 @@ def review_itinerary_node(state: TripState) -> dict:
             warnings.append(
                 f"Day {d.day}: no place from the {d.city} research shortlist is mentioned."
             )
-
+    emit_progress(
+        "review",
+        f"Checked the itinerary: {len(errors)} issue(s), {len(warnings)} warning(s)",
+    )
     return {"validation_errors": errors, "warnings": warnings}
 
 

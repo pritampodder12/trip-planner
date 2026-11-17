@@ -1,5 +1,4 @@
 import logging
-import time
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -58,7 +57,7 @@ def _build_response(thread_id: str, snapshot) -> TripResponse:
         assumptions=values.get("assumptions", []),
         warnings=values.get("warnings", []),
         attempts=values.get("attempts"),
-        revisions=values.get("rivisions", 0),
+        revisions=values.get("revisions", 0),
         approved=values.get("approved"),
         estimated_total=total,
         city_plan=values.get("city_plan"),
@@ -66,11 +65,48 @@ def _build_response(thread_id: str, snapshot) -> TripResponse:
     )
 
 
+def _summarize_usage(usage_metadata: dict) -> dict:
+    """Sum token usage across all models used in one graph run."""
+    totals = {"input": 0, "output": 0, "total": 0, "reasoning": 0, "cached": 0}
+    for model_usage in usage_metadata.values():
+        totals["input"] += model_usage.get("input_tokens", 0)
+        totals["output"] += model_usage.get("output_tokens", 0)
+        totals["total"] += model_usage.get("total_tokens", 0)
+        totals["reasoning"] += (model_usage.get("output_token_details") or {}).get(
+            "reasoning", 0
+        )
+        totals["cached"] += (model_usage.get("input_token_details") or {}).get(
+            "cache_read", 0
+        )
+    return totals
+
+
+def resume_value(pending: dict, body: ResumeIn):
+    """Validate the body against the pending interrupt; return the value for Command(resume=...)."""
+    kind = pending.get("type")
+    if kind == "questions":
+        if not body.answer or not body.answer.strip():
+            raise HTTPException(
+                status_code=422, detail="'answer' is required to answer the questions."
+            )
+        return body.answer.strip()
+    if kind == "approval":
+        if body.approved is None:
+            raise HTTPException(
+                status_code=422, detail="'approved' (true/false) is required."
+            )
+        if body.approved is False and not (body.feedback or "").strip():
+            raise HTTPException(
+                status_code=422, detail="'feedback' is required when approved is false."
+            )
+        return {"approved": body.approved, "feedback": body.feedback}
+    raise HTTPException(status_code=500, detail=f"Unknown interrupt type: {kind}")
+
+
 async def _run(
     graph, graph_input, thread_id: str, checkpoint_id: str | None = None
-) -> None:
+) -> dict:
     config = _config(thread_id, checkpoint_id)
-    started = time.perf_counter()
     with get_usage_metadata_callback() as usage:
         try:
             await graph.ainvoke(graph_input, config=config)
@@ -78,10 +114,22 @@ async def _run(
             logger.error("thread_id=%s hit the recursion limit", thread_id)
             raise HTTPException(status_code=500, detail="Planning took too many steps.")
         finally:
-            total = sum(u["total_tokens"] for u in usage.usage_metadata.values())
-            logger.info("[usage] total_tokens=%s", total)
-            logger.info("[usage] duration_s=%.1f", time.perf_counter() - started)
-            logger.info("[usage] details=%s", usage.usage_metadata)
+            totals = _summarize_usage(usage.usage_metadata)
+            logger.info(
+                "thread_id=%s token usage: total=%d (input=%d, output=%d, of which reasoning=%d, cached input=%d)",
+                thread_id,
+                totals["total"],
+                totals["input"],
+                totals["output"],
+                totals["reasoning"],
+                totals["cached"],
+            )
+            logger.debug(
+                "thread_id=%s token usage per model: %s",
+                thread_id,
+                usage.usage_metadata,
+            )
+    return totals
 
 
 async def _load(graph, thread_id: str):
@@ -96,8 +144,13 @@ async def _load(graph, thread_id: str):
 async def create_trip(body: TripIn, request: Request) -> TripResponse:
     graph = request.app.state.graph
     thread_id = uuid.uuid4().hex
-    logger.info("POST /trips: new thread_id=%s text=%r", thread_id, body.text[:100])
-    await _run(graph, {"user_text": body.text}, thread_id)
+    logger.info(
+        "POST /trips: new thread_id=%s user_id=%s text=%r",
+        thread_id,
+        body.user_id,
+        body.text[:100],
+    )
+    await _run(graph, {"user_text": body.text, "user_id": body.user_id}, thread_id)
     snapshot = await _load(graph, thread_id)
     response = _build_response(thread_id, snapshot)
     logger.info("POST /trips: thread_id=%s status=%s", thread_id, response.status)
@@ -124,26 +177,10 @@ async def resume_trip(thread_id: str, body: ResumeIn, request: Request) -> TripR
             status_code=409, detail="This trip is not waiting for input."
         )
 
-    kind = pending.get("type")
-    logger.info("POST /trips/%s/resume: pending type=%s", thread_id, kind)
-    if kind == "questions":
-        if not body.answer or not body.answer.strip():
-            raise HTTPException(
-                status_code=422, detail="'answer' is required to answer the questions."
-            )
-        value = body.answer.strip()
-    elif kind == "approval":
-        if body.approved is None:
-            raise HTTPException(
-                status_code=422, detail="'approved' (true/false) is required."
-            )
-        if body.approved is False and not (body.feedback or "").strip():
-            raise HTTPException(
-                status_code=422, detail="'feedback' is required when approved is false."
-            )
-        value = {"approved": body.approved, "feedback": body.feedback}
-    else:
-        raise HTTPException(status_code=500, detail=f"Unknown interrupt type: {kind}")
+    logger.info(
+        "POST /trips/%s/resume: pending type=%s", thread_id, pending.get("type")
+    )
+    value = resume_value(pending, body)
 
     await _run(graph, Command(resume=value), thread_id)
     snapshot = await _load(graph, thread_id)

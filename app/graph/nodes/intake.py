@@ -5,6 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
 from app.core.logging_config import log_call
+from app.core.progress import emit_progress
 from app.graph.state import TripState
 from app.schemas.trip import TripRequest
 
@@ -34,7 +35,6 @@ async def parse_trip_request(user_text: str) -> TripRequest:
 
 @log_call("node")
 async def intake_node(state: TripState) -> dict:
-    # logger.info("[node] intake | user_text=%r", state["user_text"])
+    emit_progress("intake", "Reading your request")
     request = await parse_trip_request(state["user_text"])
-    # logger.info("[node] intake | done | cities=%s days=%s", request.cities, request.days)
     return {"request": request}

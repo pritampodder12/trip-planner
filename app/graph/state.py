@@ -16,6 +16,7 @@ class CityNotes(TypedDict):
 
 
 class TripState(TypedDict, total=False):
+    user_id: str
     user_text: str  # input
     request: TripRequest  # written by intake
     missing_required: list[str]  # blocking problems, decided in code
@@ -23,8 +24,7 @@ class TripState(TypedDict, total=False):
     questions: list[str]  # follow-up questions for the user
     city_plan: CityPlan  # written by city_allocator
     city_notes: Annotated[dict[str, CityNotes], merge_dicts]  # filled in parallel
-    # messages: Annotated[list[AnyMessage], add_messages]  # reducer: append
-    # research_notes: str
+    preferences: dict  # {"explicit": {...}, "learned": {...}} loaded from the Store
     itinerary: Itinerary  # written by itinerary_builder
     attempts: int
     validation_errors: list[str]
@@ -32,3 +32,4 @@ class TripState(TypedDict, total=False):
     clarify_rounds: int
     revisions: int
     approved: bool
+    feedback_log: list[str]  # edit requests made during this trip

@@ -7,6 +7,7 @@ from app.schemas.trip import TripRequest
 
 class TripIn(BaseModel):
     text: str = Field(min_length=3, max_length=2000)
+    user_id: str = Field(default="anonymous", pattern=r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class CityStay(BaseModel):
